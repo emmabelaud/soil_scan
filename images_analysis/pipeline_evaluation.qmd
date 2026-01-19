@@ -1,0 +1,99 @@
+---
+title: "pipeline evaluation : data from "In situ soil imaging, a tool for monitoring the hourly to monthly temporal dynamics of soil biota""
+format:
+  html:
+    css: css/styles.css  
+    embed-resources: true
+    code-tools: true
+    
+execute: 
+  warning: false
+  message: false
+  echo: false
+---
+
+```{r}
+library(tidyverse)
+library(stringr)
+```
+
+```{r}
+# 1. Automated Data Preparation
+# Extracting timestamps from Basename and cleaning class names
+automated_clean <- read.csv("../images_analysis/classification_TRUF.csv") %>%
+  mutate(
+    extracted_date = str_extract(Basename, "\\d{6}-\\d{4}"),
+    year  = 2000 + as.numeric(substr(extracted_date, 1, 2)),
+    month = as.numeric(substr(extracted_date, 3, 4)),
+    day   = as.numeric(substr(extracted_date, 5, 6)),
+    hour  = as.numeric(substr(extracted_date, 8, 9)),
+    class = tolower(trimws(Predicted.class))
+  ) %>%
+  filter(class != "") %>%
+  group_by(Basename, year, month, day, hour, class) %>%
+  summarise(automated_count = n(), .groups = 'drop')
+
+# 2. Manual Data Preparation
+# Cleaning class names and aggregating counts per hour/class
+manual_clean <- read.csv("../images_analysis/invertebrates_activity.csv", sep = ";") %>%
+  mutate(
+    year  = as.numeric(year),
+    month = as.numeric(month),
+    day   = as.numeric(day),
+    hour  = as.numeric(hour),
+    class = tolower(trimws(subject))
+  ) %>%
+  group_by(year, month, day, hour, class) %>%
+  summarise(manual_count = sum(subjects_number, na.rm = TRUE), .groups = 'drop')
+
+# 3. Merging and Pivot to Long Format
+# We use a full_join to align both methods by time and class, then pivot for analysis
+comparison_data <- full_join(automated_clean, manual_clean, 
+                             by = c("year", "month", "day", "hour", "class")) %>%
+  # Fill missing Basenames for manual records using the matching timestamp
+  group_by(year, month, day, hour) %>%
+  fill(Basename, .direction = "downup") %>%
+  ungroup() %>%
+  # Pivot counts into a single column
+  pivot_longer(
+    cols = c(automated_count, manual_count),
+    names_to = "method",
+    values_to = "count"
+  ) %>%
+  mutate(
+    method = str_remove(method, "_count"),
+    count  = replace_na(count, 0)
+  ) %>%
+  select(Basename, year, month, day, hour, class, method, count)
+```
+
+```{r}
+threshold <- 20
+comparison_plot_data <- comparison_data %>%
+  mutate(timestamp = as.POSIXct(paste(year, month, day, hour), format = "%Y %m %e %H"))%>%
+  group_by(class) %>%
+  mutate(total_class_count = sum(count)) %>%
+  ungroup() %>%
+  mutate(class_grouped = if_else(total_class_count < threshold, "others", class)) %>%
+  group_by(Basename, timestamp, method, class_grouped) %>%
+  summarise(count = sum(count), .groups = 'drop')
+
+ggplot(comparison_plot_data, aes(x = timestamp, y = count, color = method)) +
+  geom_line(alpha = 0.7, linewidth = 0.8) +
+  geom_point(size = 1.5, alpha = 0.6) +
+  facet_wrap(~class_grouped, scales = "free_y") +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(
+    title = "Invertebrate Activity: Manual vs. Automated Detection",
+    subtitle = "Comparing counts over time across different taxa",
+    x = "Timeline",
+    y = "Individual Count",
+    color = "Method"
+  ) +
+  scale_color_manual(values = c("automated" = "#E41A1C", "manual" = "#377EB8"))
+```
