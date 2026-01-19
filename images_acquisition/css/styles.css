@@ -1,0 +1,92 @@
+/* ============================
+   STYLES POUR CORPS DU DOCUMENT
+============================ */
+body {
+  h1 {
+  font-size: 17pt;
+}
+
+h2 {
+  font-size: 15pt;
+}
+
+h3 {
+  font-size: 13pt;
+}
+
+h4 {
+  font-size: 12pt;
+}
+
+  font-size: 12pt;   /* ou 12pt pour lecture confortable */
+  line-height: 1.4;
+}
+
+
+
+/* ============================
+   STYLES POUR FIGURES R (plots)
+============================ */
+
+div.cell img {
+  background-color: #fdfdfd;
+  border: 2px solid #ccc;
+  padding: 1em;
+  border-radius: 5px;
+  box-shadow: 2px 2px 5px 5px rgba(0,0,0,0.1);
+  display: block;
+  margin: 1em auto;
+  background: white;
+  width: 80%;
+  max-width: 100%;
+}
+
+.full-width {
+  width: 100%;
+  max-width: 100vw;
+  margin: 0 auto;
+  padding: 0;
+}
+
+.full-width img {
+  width: 100%;
+  height: auto;
+}
+
+/* ============================
+   STYLES POUR SORTIES TEXTE R
+============================ */
+
+/* Sorties print() */
+div.cell-output.cell-output-stdout pre {
+  background-color: #fdfdfd;
+  border: 2px solid #ccc;
+  padding: 1em;
+  border-radius: 5px;
+  box-shadow: 2px 2px 5px 5px rgba(0,0,0,0.1);
+  font-family: "Arial", monospace;
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  color: #333;
+}
+
+
+/* ============================
+   STYLES POUR WARNINGS / MESSAGES / ERREURS
+============================ */
+pre.warning {
+  border: 1px solid #d33;
+  background-color: #ffe6e6;
+}
+
+pre.message {
+  border: 1px solid #3366cc;
+  background-color: #e6f0ff;
+}
+
+pre.error {
+  border: 2px dashed red;
+  background-color: #ffe6e6;
+}
