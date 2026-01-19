@@ -68,32 +68,36 @@ comparison_data <- full_join(automated_clean, manual_clean,
 ```
 
 ```{r}
+# Define threshold and Top Taxa
 threshold <- 20
-comparison_plot_data <- comparison_data %>%
-  mutate(timestamp = as.POSIXct(paste(year, month, day, hour), format = "%Y %m %e %H"))%>%
+
+# Identify the top 12 taxa by total abundance to use for the Correlation Plot
+top_taxa <- comparison_data %>%
+  group_by(class) %>%
+  summarise(total = sum(count, na.rm = TRUE)) %>%
+  slice_max(total, n = 12) %>%
+  pull(class)
+
+# Prepare the data for correlation (Wide Format)
+# We calculate total_class_count here so it's available for filtering
+correlation_data <- comparison_data %>%
   group_by(class) %>%
   mutate(total_class_count = sum(count)) %>%
   ungroup() %>%
-  mutate(class_grouped = if_else(total_class_count < threshold, "others", class)) %>%
-  group_by(Basename, timestamp, method, class_grouped) %>%
-  summarise(count = sum(count), .groups = 'drop')
+  pivot_wider(names_from = method, values_from = count, values_fill = 0)
 
-ggplot(comparison_plot_data, aes(x = timestamp, y = count, color = method)) +
-  geom_line(alpha = 0.7, linewidth = 0.8) +
-  geom_point(size = 1.5, alpha = 0.6) +
-  facet_wrap(~class_grouped, scales = "free_y") +
+ggplot(correlation_data %>% filter(class %in% top_taxa), 
+       aes(x = manual, y = automated)) +
+  geom_point(alpha = 0.4, color = "#4DAF4A") +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + 
+  geom_smooth(method = "lm", color = "blue", se = FALSE, size = 0.8) + 
+  facet_wrap(~class, scales = "free") +
   theme_minimal() +
-  theme(
-    legend.position = "bottom",
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    panel.grid.minor = element_blank()
-  ) +
   labs(
-    title = "Invertebrate Activity: Manual vs. Automated Detection",
-    subtitle = "Comparing counts over time across different taxa",
-    x = "Timeline",
-    y = "Individual Count",
-    color = "Method"
-  ) +
-  scale_color_manual(values = c("automated" = "#E41A1C", "manual" = "#377EB8"))
+    title = "Detection Accuracy: Manual vs. Automated",
+    subtitle = "Dashed line represents 1:1 agreement; Blue line is the linear trend",
+    x = "Manual Count (Ground Truth)",
+    y = "Automated Count (AI Prediction)"
+  )
+
 ```
