@@ -164,8 +164,3 @@ performance_stats <- matrix_data %>%
 
 knitr::kable(performance_stats, digits = 2, caption = "Performance Metrics by Project and Class")
 ```
-
-```{r}
-
-```
-
