@@ -1,5 +1,5 @@
 ---
-title: "pipeline evaluation : data from "In situ soil imaging, a tool for monitoring the hourly to monthly temporal dynamics of soil biota""
+title: "pipeline evaluation"
 format:
   html:
     css: css/styles.css  
@@ -13,91 +13,159 @@ execute:
 ---
 
 ```{r}
+#| label: setup
+#| include: false
 library(tidyverse)
 library(stringr)
+library(readxl)
+library(ggplot2)
+
+# Helper function to normalize class names
+clean_class <- function(x) tolower(trimws(as.character(x)))
 ```
 
-```{r}
-# 1. Automated Data Preparation
-# Extracting timestamps from Basename and cleaning class names
-automated_clean <- read.csv("../images_analysis/classification_TRUF.csv") %>%
-  mutate(
-    extracted_date = str_extract(Basename, "\\d{6}-\\d{4}"),
-    year  = 2000 + as.numeric(substr(extracted_date, 1, 2)),
-    month = as.numeric(substr(extracted_date, 3, 4)),
-    day   = as.numeric(substr(extracted_date, 5, 6)),
-    hour  = as.numeric(substr(extracted_date, 8, 9)),
-    class = tolower(trimws(Predicted.class))
-  ) %>%
-  filter(class != "") %>%
-  group_by(Basename, year, month, day, hour, class) %>%
-  summarise(automated_count = n(), .groups = 'drop')
+Data from "In situ soil imaging, a tool for monitoring the hourly to monthly temporal dynamics of soil biota"
 
-# 2. Manual Data Preparation
-# Cleaning class names and aggregating counts per hour/class
-manual_clean <- read.csv("../images_analysis/invertebrates_activity.csv", sep = ";") %>%
+```{r}
+#| label: truf-data-filtered
+
+# 1. Clean Manual Data (The Reference)
+truf_manual <- read.csv("../images_analysis/TRUF_data/invertebrates_activity.csv", sep = ";") %>%
   mutate(
-    year  = as.numeric(year),
-    month = as.numeric(month),
-    day   = as.numeric(day),
-    hour  = as.numeric(hour),
-    class = tolower(trimws(subject))
+    across(c(year, month, day, hour), as.numeric),
+    class = clean_class(subject)
   ) %>%
   group_by(year, month, day, hour, class) %>%
-  summarise(manual_count = sum(subjects_number, na.rm = TRUE), .groups = 'drop')
+  summarise(manual_n = sum(subjects_number, na.rm = TRUE), .groups = 'drop')
 
-# 3. Merging and Pivot to Long Format
-# We use a full_join to align both methods by time and class, then pivot for analysis
-comparison_data <- full_join(automated_clean, manual_clean, 
-                             by = c("year", "month", "day", "hour", "class")) %>%
-  # Fill missing Basenames for manual records using the matching timestamp
+# 2. Clean Automated Data Raw
+truf_auto_raw <- read.csv("../images_analysis/TRUF_data/classification_TRUF.csv", na = c("NA", "")) %>%
+  mutate(
+    temp_date = str_extract(Basename, "\\d{6}-\\d{4}"),
+    year      = 2000 + as.numeric(substr(temp_date, 1, 2)),
+    month     = as.numeric(substr(temp_date, 3, 4)),
+    day       = as.numeric(substr(temp_date, 5, 6)),
+    hour      = as.numeric(substr(temp_date, 8, 9)),
+    class     = clean_class(Predicted.class)
+  ) %>%
+  filter(class != "") %>%
+  drop_na(year, month, day, hour)
+
+# 3. Filter Automated to match Manual Timepoints
+# This discards any automated scans that weren't manually audited
+truf_auto_filtered <- truf_auto_raw %>%
+  semi_join(truf_manual, by = c("year", "month", "day", "hour")) %>%
+  group_by(Basename, year, month, day, hour, class) %>%
+  summarise(auto_n = n(), .groups = 'drop')
+
+# 4. Final Correspondence Merge
+truf_combined <- full_join(truf_auto_filtered, truf_manual, 
+                           by = c("year", "month", "day", "hour", "class")) %>%
   group_by(year, month, day, hour) %>%
   fill(Basename, .direction = "downup") %>%
   ungroup() %>%
-  # Pivot counts into a single column
-  pivot_longer(
-    cols = c(automated_count, manual_count),
-    names_to = "method",
-    values_to = "count"
-  ) %>%
+  pivot_longer(cols = c(auto_n, manual_n), names_to = "method", values_to = "count") %>%
   mutate(
-    method = str_remove(method, "_count"),
-    count  = replace_na(count, 0)
+    method = str_remove(method, "_n"),
+    count  = replace_na(count, 0),
+    project = "TRUF"
+  )
+```
+
+
+Data from DESCENT / ADEME project
+
+```{r}
+#| label: descent-data-filtered
+
+# 1. Clean Manual Data First (The Reference)
+descent_manual <- read_excel("../images_analysis/DESCENT_data/database_-_axe2.xlsx", 
+                             sheet = "activite_8h", na = "NA") %>%
+  select(year, month, day, hour, subject, number) %>%
+  mutate(
+    across(c(year, month, day, hour), as.numeric),
+    class = clean_class(subject)
   ) %>%
-  select(Basename, year, month, day, hour, class, method, count)
+  group_by(year, month, day, hour, class) %>%
+  summarise(manual_n = sum(number, na.rm = TRUE), .groups = 'drop')
+
+# 2. Clean Automated Data
+descent_auto_raw <- read.csv("../images_analysis/DESCENT_data/Classification_SLM_2023.csv", na = c("NA", "")) %>%
+  mutate(
+    fname     = basename(Original.sample.path),
+    date_part = str_extract(fname, "\\d{4}-\\d{2}-\\d{2}"),
+    year      = as.numeric(str_sub(date_part, 1, 4)),
+    month     = as.numeric(str_sub(date_part, 6, 7)),
+    day       = as.numeric(str_sub(date_part, 9, 10)),
+    hour      = as.numeric(str_extract(fname, "\\d{2}(?=H)")),
+    class     = clean_class(Predicted.class),
+    Basename  = str_extract(fname, "scan\\d+.*(?=\\.tiff)")
+  )%>%
+  drop_na()
+
+# 3. Filter Automated to match only timepoints present in Manual
+# This ensures we are comparing the performance on the exact same raw data
+descent_auto_filtered <- descent_auto_raw %>%
+  semi_join(descent_manual, by = c("year", "month", "day", "hour")) %>%
+  group_by(Basename, year, month, day, hour, class) %>%
+  summarise(auto_n = n(), .groups = 'drop')
+
+# 4. Final Correspondence Merge
+descent_combined <- full_join(descent_auto_filtered, descent_manual, 
+                              by = c("year", "month", "day", "hour", "class")) %>%
+  group_by(year, month, day, hour) %>%
+  fill(Basename, .direction = "downup") %>%
+  ungroup() %>%
+  pivot_longer(cols = c(auto_n, manual_n), names_to = "method", values_to = "count") %>%
+  mutate(
+    method = str_remove(method, "_n"),
+    count  = replace_na(count, 0),
+    project = "DESCENT"
+  )
+
+write.csv(descent_combined, "../images_analysis/DESCENT_data/SLM_2023_combined_pipeline.csv", row.names = FALSE)
 ```
 
 ```{r}
-# Define threshold and Top Taxa
-threshold <- 20
+#| label: visualization
+#| fig-width: 10
+#| fig-height: 6
 
-# Identify the top 12 taxa by total abundance to use for the Correlation Plot
-top_taxa <- comparison_data %>%
-  group_by(class) %>%
-  summarise(total = sum(count, na.rm = TRUE)) %>%
-  slice_max(total, n = 12) %>%
-  pull(class)
-
-# Prepare the data for correlation (Wide Format)
-# We calculate total_class_count here so it's available for filtering
-correlation_data <- comparison_data %>%
-  group_by(class) %>%
-  mutate(total_class_count = sum(count)) %>%
-  ungroup() %>%
-  pivot_wider(names_from = method, values_from = count, values_fill = 0)
-
-ggplot(correlation_data %>% filter(class %in% top_taxa), 
-       aes(x = manual, y = automated)) +
-  geom_point(alpha = 0.4, color = "#4DAF4A") +
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey50") + 
-  geom_smooth(method = "lm", color = "blue", se = FALSE, size = 0.8) + 
-  facet_wrap(~class, scales = "free") +
+# Bind all projects together if you want a global view
+all_projects <- bind_rows(truf_combined, descent_combined)
+all_projects %>%
+  group_by(project, method, class)%>%
+  reframe(count = sum(count))%>%
+ggplot(aes(x = class, y = count, fill = method)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~project, scales = "free_y") +
   theme_minimal() +
   labs(
-    title = "Detection Accuracy: Manual vs. Automated",
-    subtitle = "Dashed line represents 1:1 agreement; Blue line is the linear trend",
-    x = "Manual Count (Ground Truth)",
-    y = "Automated Count (AI Prediction)"
+    title = "Comparison of Automated vs. Manual Fauna Counts",
+    subtitle = "Analysis across TRUF and DESCENT projects",
+    x = "Taxonomic Class",
+    y = "Count",
+    fill = "Method"
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+```{r}
+#| label: performance-metrics
+
+performance_stats <- matrix_data %>%
+  group_by(project, class) %>%
+  summarise(
+    Total_Manual = sum(manual),
+    Total_Auto   = sum(auto),
+    Correlation  = cor(manual, auto, method = "pearson"),
+    MAE          = mean(abs(manual - auto)), # Mean Absolute Error
+    .groups = "drop"
   )
 
+knitr::kable(performance_stats, digits = 2, caption = "Performance Metrics by Project and Class")
 ```
+
+```{r}
+
+```
+
