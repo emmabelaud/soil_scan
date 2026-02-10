@@ -1,0 +1,31 @@
+Model: images_acquisition/DHARMA/SuppFig_S4_Collembola 
+
+
+	DHARMa nonparametric dispersion test via sd of residuals fitted vs. simulated
+
+data:  simulationOutput
+dispersion = 0.80317, p-value = 0.732
+alternative hypothesis: two.sided
+
+
+
+	DHARMa zero-inflation test via comparison to expected zeros with simulation under
+	H0 = fitted model
+
+data:  simulationOutput
+ratioObsSim = 0, p-value < 2.2e-16
+alternative hypothesis: two.sided
+
+
+
+	DHARMa bootstrapped outlier test
+
+data:  sim
+outliers at both margin(s) = 0, observations = 100, p-value = 1
+alternative hypothesis: two.sided
+ percent confidence interval:
+ 0.00 0.01
+sample estimates:
+outlier frequency (expected: 0.001 ) 
+                                   0 
+

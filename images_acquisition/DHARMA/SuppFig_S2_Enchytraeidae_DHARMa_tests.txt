@@ -1,0 +1,31 @@
+Model: images_acquisition/DHARMA/SuppFig_S2_Enchytraeidae 
+
+
+	DHARMa nonparametric dispersion test via sd of residuals fitted vs. simulated
+
+data:  simulationOutput
+dispersion = 0.90542, p-value = 0.689
+alternative hypothesis: two.sided
+
+
+
+	DHARMa zero-inflation test via comparison to expected zeros with simulation under
+	H0 = fitted model
+
+data:  simulationOutput
+ratioObsSim = 0, p-value = 1
+alternative hypothesis: two.sided
+
+
+
+	DHARMa bootstrapped outlier test
+
+data:  sim
+outliers at both margin(s) = 0, observations = 96, p-value = 1
+alternative hypothesis: two.sided
+ percent confidence interval:
+ 0.00000000 0.01041667
+sample estimates:
+outlier frequency (expected: 0.00166666666666667 ) 
+                                                 0 
+
