@@ -1,32 +1,3 @@
-<<<<<<< HEAD
-# ============================================================
-# ASE scanner calibration — merged pipeline
-#
-# What it does
-#   1) Reads detection database (one row = one detection)
-#   2) Builds IMAGE-level counts and RUN-level replicates
-#   3) Fits GLMMs (NB or ZINB) for:
-#        - Total fauna
-#        - Acari, Collembola, Enchytraeidae
-#   4) Extracts (i) marginal/conditional R2, and (ii) LRT p-values for:
-#        - frequency (frequence)
-#        - resolution
-#        - interaction
-#   5) Computes cumulative detections curves (cumsum) for each
-#      resolution × frequency combination, for total + 3 taxa
-#   6) Fits candidate curve types to each cumsum curve and exports
-#      a table with the best curve type + parameter estimates
-#
-# Notes
-#   - "pouvoir explicatif" is reported here as marginal/conditional R2
-#     (Nakagawa) + likelihood-ratio chi-square for each term.
-#   - Main-effect tests in presence of interaction are handled as:
-#       * Interaction tested alone (drop interaction term)
-#       * Resolution importance: drop resolution AND the interaction
-#       * Frequency importance:  drop frequency AND the interaction
-#     This yields interpretable "global" tests.
-# ============================================================
-
 # -----------------------
 # 0) Packages
 # -----------------------
