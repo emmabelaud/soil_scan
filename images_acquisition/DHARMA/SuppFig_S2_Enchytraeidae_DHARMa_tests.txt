@@ -23,8 +23,13 @@ data:  sim
 outliers at both margin(s) = 0, observations = 96, p-value = 1
 alternative hypothesis: two.sided
  percent confidence interval:
- 0.00000000 0.01041667
+ 0.00000000 0.02083333
 sample estimates:
+<<<<<<< HEAD
 outlier frequency (expected: 0.00145833333333333 ) 
                                                  0 
+=======
+outlier frequency (expected: 0.001875 ) 
+                                      0 
+>>>>>>> bf08ac3c9e81b58b76eb57951292eebe23db638d
 
