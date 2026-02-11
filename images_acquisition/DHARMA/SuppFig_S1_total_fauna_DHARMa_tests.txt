@@ -9,8 +9,7 @@ alternative hypothesis: two.sided
 
 
 
-	DHARMa zero-inflation test via comparison to expected zeros with simulation under
-	H0 = fitted model
+	DHARMa zero-inflation test via comparison to expected zeros with simulation under H0 = fitted model
 
 data:  simulationOutput
 ratioObsSim = 0, p-value = 0.859
@@ -24,8 +23,8 @@ data:  sim
 outliers at both margin(s) = 0, observations = 125, p-value = 1
 alternative hypothesis: two.sided
  percent confidence interval:
- 0.0000 0.0042
+ 0.000 0.008
 sample estimates:
-outlier frequency (expected: 0.00048 ) 
+outlier frequency (expected: 0.00064 ) 
                                      0 
 

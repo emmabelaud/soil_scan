@@ -4,13 +4,12 @@ Model: images_acquisition/DHARMA/SuppFig_S4_Collembola
 	DHARMa nonparametric dispersion test via sd of residuals fitted vs. simulated
 
 data:  simulationOutput
-dispersion = 0.80317, p-value = 0.732
+dispersion = 0.7934, p-value = 0.732
 alternative hypothesis: two.sided
 
 
 
-	DHARMa zero-inflation test via comparison to expected zeros with simulation under
-	H0 = fitted model
+	DHARMa zero-inflation test via comparison to expected zeros with simulation under H0 = fitted model
 
 data:  simulationOutput
 ratioObsSim = 0, p-value < 2.2e-16
