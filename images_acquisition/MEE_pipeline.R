@@ -1463,14 +1463,14 @@ emm_taxa_tbl <- bind_rows(
   )
 
 p_taxa <- emm_taxa_tbl %>%
-  ggplot(aes(x = frequence, y = response, colour = resolution)) +
+  ggplot(aes(x = resolution, y = log(response))) +
   geom_point(position = position_dodge(width = 0.2)) +
-  geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL),
+  geom_errorbar(aes(ymin = log(lower.CL), ymax = log(upper.CL)),
                 width = 0.1, position = position_dodge(width = 0.2)) +
-  facet_grid(taxon ~ ., scales = "free_y") +
+  facet_grid(taxon ~ frequence) +
   labs(
-    x = "Acquisition interval (min)",
-    y = "Detected activity (expected count per image)"
+    x = "Image resolution (dpi)",
+    y = "Detected individuals per image\n(log scale)"
   ) +
   theme_bw()
 
@@ -1480,7 +1480,7 @@ ggplot2::ggsave(
   filename = "images_acquisition/Figures/Fig_taxa_activity.png",
   plot     = p_taxa,
   width    = 180,
-  height   = 120,
+  height   = 180,
   units    = "mm",
   dpi      = 300,
   bg       = "white"
@@ -1566,70 +1566,115 @@ if (all(bbox_cols %in% names(dat1))) {
 
 # -----------------------
 # 10) Cumsum curves for each resolution × frequency (total + 3 taxa)
+#    + summaries (mean/sd across runs)
+#    + curve fitting per run and summary across runs
 # -----------------------
 
+# ---- 10.1 Build raw cumulative curves (per run_id) ----
 # Total
 cum_total <- make_cumsum_df(
   img_total,
-  group_cols = c("resolution","frequence"),
-  value_col = "n_img"
+  group_cols = c("resolution","frequence","run_id"),
+  value_col  = "n_img"
 ) %>%
   transmute(
-    taxon = "Total",
-    resolution,
-    frequence,
+    taxon      = "Total",
+    resolution = factor(resolution),
+    frequence  = factor(frequence),
     datetime,
-    x = effort_img,
+    run_id,
+    x = effort_img,   # 1..12
     y = cum_obs
   )
 
 # Taxa
 cum_taxa <- make_cumsum_df(
   img_taxa,
-  group_cols = c("taxon","resolution","frequence"),
-  value_col = "n_img"
+  group_cols = c("taxon","resolution","frequence","run_id"),
+  value_col  = "n_img"
 ) %>%
   transmute(
-    taxon = as.character(taxon),
-    resolution,
-    frequence,
+    taxon      = as.character(taxon),
+    resolution = factor(resolution),
+    frequence  = factor(frequence),
     datetime,
+    run_id,
     x = effort_img,
     y = cum_obs
   )
 
 cum_all <- bind_rows(cum_total, cum_taxa) %>%
   mutate(
-    taxon = factor(taxon, levels = c("Total","Acari","Collembola","Enchytraeidae")),
-    resolution = factor(resolution),
-    frequence  = factor(frequence)
+    taxon = factor(taxon, levels = c("Total","Acari","Collembola","Enchytraeidae"))
   )
 
 readr::write_csv(cum_all, "images_acquisition/Tables/Table_cumsum_curves_raw.csv")
 
+# ---- 10.2 Summary mean/sd across runs (for plotting mean curves) ----
+# Note: averages at fixed x (= image count), across runs within taxon×resolution×frequence
+cum_all_sum <- cum_all %>%
+  group_by(taxon, resolution, frequence, x) %>%
+  summarise(
+    y_mean = mean(y, na.rm = TRUE),
+    y_sd   = sd(y, na.rm = TRUE),
+    n_runs = n_distinct(run_id),
+    y_se   = y_sd / sqrt(n_runs),
+    .groups = "drop"
+  )
+
+readr::write_csv(cum_all_sum, "images_acquisition/Tables/Table_cumsum_curves_mean_sd.csv")
+
 # -----------------------
-# 11) Fit curve types to each cumsum curve
+# 11) Fit curve types to each cumsum curve (per run), then summarise across runs
 # -----------------------
 
+# ---- 11.1 Fit candidate curves per run ----
 Table_curves_all <- cum_all %>%
-  group_by(taxon, resolution, frequence) %>%
+  group_by(taxon, resolution, frequence, run_id) %>%
   group_modify(~{
-    fits <- fit_curve_candidates(.x %>% select(x, y))
+    fits <- fit_curve_candidates(.x %>% dplyr::select(x, y))
     if (nrow(fits) == 0) return(tibble())
     fits
   }) %>%
   ungroup() %>%
-  arrange(taxon, resolution, frequence, AIC)
+  arrange(taxon, resolution, frequence, run_id, AIC)
 
+readr::write_csv(Table_curves_all, "images_acquisition/Tables/Table_cumsum_curve_fits_ALL.csv")
+
+# ---- 11.2 Pick best curve per run (AIC-min) ----
 Table_curves_best <- Table_curves_all %>%
-  group_by(taxon, resolution, frequence) %>%
+  group_by(taxon, resolution, frequence, run_id) %>%
   slice_min(order_by = AIC, n = 1, with_ties = FALSE) %>%
-  ungroup() %>%
-  arrange(taxon, resolution, frequence)
+  ungroup()
 
-readr::write_csv(Table_curves_all,  "images_acquisition/Tables/Table_cumsum_curve_fits_ALL.csv")
-readr::write_csv(Table_curves_best, "images_acquisition/Tables/Table_cumsum_curve_fits_BEST.csv")
+readr::write_csv(Table_curves_best, "images_acquisition/Tables/Table_cumsum_curve_fits_BEST_by_run.csv")
 
+# ---- 11.3 Summarise best-fit parameters across runs (mean/sd) ----
+# If curve_type varies across runs within a combination, this keeps curve_type explicit.
+Table_curves_best_sum <- Table_curves_best %>%
+  group_by(taxon, resolution, frequence, curve_type) %>%
+  summarise(
+    param_a    = mean(param_a, na.rm = TRUE),
+    param_a_sd = sd(param_a,   na.rm = TRUE),
+    param_b    = mean(param_b, na.rm = TRUE),
+    param_b_sd = sd(param_b,   na.rm = TRUE),
+    param_c    = mean(param_c, na.rm = TRUE),
+    param_c_sd = sd(param_c,   na.rm = TRUE),
+    n_runs     = n(),
+    .groups = "drop"
+  ) %>%
+  arrange(taxon, resolution, frequence, desc(n_runs))
+
+readr::write_csv(Table_curves_best_sum, "images_acquisition/Tables/Table_cumsum_curve_params_mean_sd.csv")
+
+# Optional: if you want ONE curve_type per (taxon,resolution,frequence),
+# keep the most frequent curve_type (mode) and its parameter summaries.
+Table_curves_best_mode <- Table_curves_best_sum %>%
+  group_by(taxon, resolution, frequence) %>%
+  slice_max(order_by = n_runs, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+readr::write_csv(Table_curves_best_mode, "images_acquisition/Tables/Table_cumsum_curve_params_mode.csv")
 
 # -----------------------
 # 12) Graphical outputs (GLMM diagnostics + cumsum curves)
@@ -1653,21 +1698,43 @@ invisible(save_dharma(res_ench$model,  "Enchytraeidae"))
 invisible(save_dharma(res_acar$model,  "Acari"))
 invisible(save_dharma(res_coll$model,  "Collembola"))
 
-# --- 12.2 Raw cumsum curves ---
-
-p_raw <- ggplot(cum_all, aes(x = x, y = log(y), group = interaction(resolution, frequence), colour = resolution)) +
-  geom_line(linewidth = 0.6) +
-  facet_grid(taxon ~ frequence, scales = "free_y") +
-  labs(x = "Number of events", y = "Cumulative detections", colour = "Resolution") +
+# ---- 12.2 Raw curves (per run) + mean ± SD (exclude Total if desired) ----
+p_raw_mean <- ggplot() +
+  # raw run curves (thin)
+  geom_line(
+    data = subset(cum_all, taxon != "Total"),
+    aes(x = x, y = log(y), group = interaction(run_id, resolution, frequence), colour = resolution),
+    linewidth = 0.4, alpha = 0.25
+  ) +
+  # mean ± SE ribbon
+  geom_ribbon(
+    data = subset(cum_all_sum, taxon != "Total"),
+    aes(
+      x = x,
+      ymin = log(pmax(y_mean - y_se, 1e-6)),
+      ymax = log(pmax(y_mean + y_se, 1e-6)),
+      group = interaction(resolution, frequence)
+    ),
+    alpha = 0.15
+  )+
+  # mean curve
+  geom_line(
+    data = subset(cum_all_sum, taxon != "Total"),
+    aes(x = x, y = log(pmax(y_mean, 1e-9)), group = interaction(resolution, frequence), colour = resolution),
+    linewidth = 0.9
+  ) +
+  facet_grid(taxon ~ frequence) +
+  labs(x = "Number of events (images)", y = "Cumulative detections (log scale)", colour = "Resolution") +
   theme_bw()
 
-ggsave(filename = file.path(fig_dir, "Cumsum_raw_by_taxon_freq.png"), plot = p_raw, width = 11, height = 8, dpi = 300)
+ggsave(
+  filename = file.path(fig_dir, "Cumsum_raw_plus_mean_sd_by_taxon_freq.png"),
+  plot = p_raw_mean, width = 11, height = 8, dpi = 300
+)
 
-# --- 12.3 Best-fit curves overlay ---
-
-predict_curve <- function(curve_type, a, b, c, x){
+# ---- 12.2 Best-fit curves overlay (using mode curve_type per group) ----
+predict_curve <- function(curve_type, a, b, c, x) {
   if (is.na(curve_type) || curve_type == "") return(rep(NA_real_, length(x)))
-  
   if (curve_type == "linear") {
     a + b*x
   } else if (curve_type == "neg_exp") {
@@ -1685,64 +1752,40 @@ predict_curve <- function(curve_type, a, b, c, x){
   }
 }
 
-
-# Build predictions for each group using the best (AIC-min) curve
 pred_best <- cum_all %>%
+  filter(taxon != "Total") %>%
   group_by(taxon, resolution, frequence) %>%
   summarise(x_min = min(x), x_max = max(x), .groups = "drop") %>%
-  left_join(Table_curves_best, by = c("taxon","resolution","frequence")) %>%
+  left_join(Table_curves_best_mode, by = c("taxon","resolution","frequence")) %>%
+  filter(!is.na(curve_type)) %>%
   mutate(x_grid = purrr::map2(x_min, x_max, ~seq(.x, .y, length.out = 200))) %>%
-  filter(!is.na(curve_type)) %>%   # <- clé
   mutate(
     y_hat = purrr::pmap(
       list(curve_type, param_a, param_b, param_c, x_grid),
       ~predict_curve(..1, ..2, ..3, ..4, ..5)
     )
   ) %>%
-  select(taxon, resolution, frequence, curve_type, param_a, param_b, param_c, x_grid, y_hat) %>%
   tidyr::unnest(c(x_grid, y_hat)) %>%
   rename(x = x_grid, y = y_hat)
 
-
 p_fit <- ggplot() +
-  geom_line(data = cum_all,
-            aes(x = x, y = log(y), group = interaction(resolution, frequence), colour = resolution),
-            linewidth = 0.5, alpha = 0.35) +
-  geom_line(data = pred_best,
-            aes(x = x, y = log(y), group = interaction(resolution, frequence), colour = resolution),
-            linewidth = 0.9) +
-  facet_grid(taxon ~ frequence)+ #, scales = "free_y") +
-  labs(x = "Number of events", y = "Cumulative detections (log scale)",
-       colour = "Resolution",
-       title = "Cumulative detections with best-fit curve (AIC)") +
-  theme_bw()
+  geom_line(
+    data = subset(cum_all, taxon != "Total"),
+    aes(x = x, y = log(y), group = interaction(run_id, resolution, frequence), colour = resolution),
+    linewidth = 0.4, alpha = 0.25
+  ) +
+  geom_line(
+    data = pred_best,
+    aes(x = x, y = log(pmax(y, 1e-9)), group = interaction(resolution, frequence), colour = resolution),
+    linewidth = 1.0
+  ) +
+  facet_grid(taxon ~ frequence) +
+  labs(x = "Number of events (images)", y = "Cumulative detections (log scale)", colour = "Resolution") +
+  theme_bw()+
+  scale_x_continuous(limits = c(1, 11), breaks = c(3,6,9))
 
-ggsave(filename = file.path(fig_dir, "Cumsum_bestfit_overlay_by_taxon_freq.png"), plot = p_fit, width = 11, height = 8, dpi = 300)
+ggsave(
+  filename = file.path(fig_dir, "Cumsum_bestfit_overlay_by_taxon_freq.png"),
+  plot = p_fit, width = 11, height = 8, dpi = 300
+)
 
-
-# 2) Calcul y_hat(100) = a * 100^b
-best2 <- Table_curves_best  %>%
-  mutate(
-    x_ref = 100,
-    y_hat_100 = param_a * (x_ref ^ param_b)
-  )
-
-# 3) Tableau synthétique (large) : une ligne par taxon × résolution, colonnes = fréquences
-tab_yhat100 <- best2 %>%
-  select(taxon, resolution, frequence, y_hat_100) %>%
-  mutate(
-    resolution = as.character(resolution),
-    frequence  = as.character(frequence)
-  ) %>%
-  tidyr::pivot_wider(
-    names_from  = frequence,
-    values_from = y_hat_100,
-    names_prefix = "yhat100_f"
-  ) %>%
-  arrange(taxon, as.numeric(resolution)) %>%
-  mutate(across(starts_with("yhat100_"), ~round(.x, 1)))
-
-# 4) Export (optionnel)
-readr::write_csv(best2, "images_acquisition/Tables/Table_cumsum_yhat100_allcombos.csv")
-readr::write_csv(tab_yhat100, "images_acquisition/Tables/Table_cumsum_yhat100_summary.csv")
->>>>>>> 8cdbb27dd9f7a913e5ed75834ee7d991d728501b
