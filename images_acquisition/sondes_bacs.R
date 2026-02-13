@@ -43,7 +43,7 @@ temp_long <- clean_data %>%
 # 4. Volumetric Water Content (VWC) Data Transformation
 hum_long <- clean_data %>%
   select(TIMESTAMP, VWC.1., VWC.2., VWC.3.) %>%
-  pivot_longer(cols = starts_with("VWC"), names_to = "Source", values_to = "Moisture") %>%
+  pivot_longer(cols = starts_with("VWC"), names_to = "Source", values_to = "Humidity") %>%
   mutate(Source = recode(Source, 
                          "VWC.1." = "BAC 1", 
                          "VWC.2." = "BAC 2", 
@@ -58,12 +58,21 @@ p_temp <- ggplot(temp_long, aes(x = TIMESTAMP, y = Temperature, color = Source))
   labs(title = "Temperature Evolution", x = "Date", y = "Temperature (°C)") +
   theme_bw()
 
-# Moisture Plot
-p_hum <- ggplot(hum_long, aes(x = TIMESTAMP, y = Moisture, color = Source)) +
+# Humidity Plot
+p_hum <- ggplot(hum_long, aes(x = TIMESTAMP, y = Humidity, color = Source)) +
   geom_line(linewidth = 1) +
   scale_color_manual(values = sensor_colors) +
   labs(title = "Volumetric Water Content (VWC)", x = "Date", y = "Humidity (%)") +
   theme_bw()
 
-# Display both figures in a single column
-grid.arrange(p_temp, p_hum, ncol = 1)
+#Save plot
+combined <- gridExtra::arrangeGrob(p_temp, p_hum, ncol = 1)
+ggsave(
+  filename = "images_acquisition/Figures/Figure_sensors_data.png", 
+  plot = combined,
+  device = "png",
+  width = 8, 
+  height = 10, 
+  units = "in",
+  dpi = 300
+)
