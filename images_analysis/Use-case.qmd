@@ -1,0 +1,300 @@
+---
+title: "MEE paper use_case"
+author: "Emma Belaud"
+format: html
+editor: visual
+---
+
+Use case in digital ecology aimed at combining two critical dimensions: ecological relevance and technological reliability. Can an automated pipeline replace a human taxonomist without changing the ecological narrative?
+
+-   **H1 (Ecological Stability):** Soil invertebrate activity in the **arboreal linear (Position A)** exhibits higher temporal stability (lower variance in activity peaks) compared to **cultivated zones (Position C)**, which show more abrupt, pulsed dynamics.
+
+-   **H2 (Technological Congruence):** The ecological metrics derived from `Model_class` (activity peaks, temporal trends, and habitat preference) are statistically indistinguishable from those derived from `Manual_class`, regardless of taxon rarity.
+
+
+```{r}
+#| label: setup-env
+library(tidyverse)
+library(lubridate)
+library(glmmTMB)
+library(performance)
+library(broom.mixed)
+library(slider)
+library(DHARMa)
+
+# Custom plot theme for MEE publication style
+theme_mee <- function() {
+  theme_minimal() +
+    theme(panel.grid.minor = element_blank(),
+          strip.text = element_text(face = "bold"),
+          axis.title = element_text(face = "bold"))
+}
+```
+
+```{r}
+#| label: setup-env
+library(tidyverse)
+library(lubridate)
+library(glmmTMB)
+library(slider)
+library(performance)
+library(broom.mixed)
+library(DHARMa) # Critical for ZIG model validation
+```
+
+Data Loading and Cleaning
+
+```{r}
+#| label: data-loading
+
+# Import and parse metadata from image filenames
+df <- read.csv("../images_analysis/DIAMS_data/combined_data.csv", 
+               header = FALSE, strip.white = TRUE, na.strings = "NA")
+colnames(df) <- c('image_name', 'Model_class', "Manual_class")
+
+# Regex pattern to extract spatial-temporal metadata
+pattern <- "^(.*)_(\\d{4}-\\d{2}-\\d{2}_\\d{2}H\\d{2}M)\\.jp2_(\\d+)_(\\d+)\\s(\\d+)\\s(\\d+)\\s(\\d+)\\.jpeg$"
+
+df_clean <- df %>%
+  extract(image_name, 
+          into = c("scanner", "datetime_raw", "extract_num", "xmin", "ymin", "xmax", "ymax"),
+          regex = pattern, remove = FALSE) %>%
+  mutate(
+    position    = substr(scanner, 4, 4),  
+    depth       = substr(scanner, 5, 6),   
+    orientation = substr(scanner, 8, 8),   
+    across(c(extract_num, xmin, ymin, xmax, ymax), as.integer),
+    date = ymd_hm(str_replace(datetime_raw, "_", " "))) %>%
+  filter(date < "2024-04-09 00:00:00") %>%
+  # Standardize sub-hourly drifts to 6h intervals (00, 06, 12, 18)
+  mutate(date = if_else(minute(date) == 1, date - minutes(1), date),
+         hour = hour(date),
+         day  = as.Date(date)) %>%
+  filter(minute(date) == 0, hour %in% c(0, 6, 12, 18)) %>%
+  # Remove background-only observations for ecological focus
+  filter(!(Model_class == "background" & Manual_class == "background")) %>%
+  select(-datetime_raw) %>%
+  drop_na(date, position, Manual_class)
+```
+
+Data Completion and Missingness
+
+```{r}
+#| label: data-completion
+
+# Ensure every scanner-time combination exists (crucial for zero-inflation)
+df_complete <- expand_grid(
+  day         = unique(df_clean$day),
+  hour        = c("00:00", "06:00", "12:00", "18:00"),
+  position    = unique(df_clean$position),
+  depth       = unique(df_clean$depth),
+  orientation = unique(df_clean$orientation)
+) %>%
+  left_join(df_clean %>% mutate(hour = sprintf("%02d:00", hour)), 
+            by = c("day", "hour", "position", "depth", "orientation"))
+```
+
+##HYPOTHESIS 1
+
+Rolling Stability Framework
+
+```{r}
+#| label: functional-stability-prep
+
+#' Compute Rolling Stability Metrics
+#' @description Computes CV using a sliding window. 
+#' Decouples sampling frequency from the reported step resolution.
+compute_rolling_stability <- function(data, window_days = 7, slots_per_day = 4, daily_step = TRUE) {
+  lookback <- (window_days * slots_per_day) - 1
+  
+  res <- data %>%
+    arrange(date) %>%
+    mutate(
+      roll_mean = slide_dbl(activity_log, mean, .before = lookback, .complete = TRUE),
+      roll_sd   = slide_dbl(activity_log, sd,   .before = lookback, .complete = TRUE),
+      # Add constant to mean to prevent division by zero in quiet periods
+      roll_cv   = roll_sd / (roll_mean + 0.001)
+    ) %>%
+    filter(!is.na(roll_cv))
+  
+  if (daily_step) res <- res %>% filter(hour(date) == 0)
+  return(res)
+}
+
+# Apply rolling window to common taxa (>= 100 detections)
+min_detections <- 100
+
+stability_results <- df_complete %>%
+  group_by(Manual_class) %>%
+  filter(n() >= min_detections) %>%
+  ungroup() %>%
+  # Aggregate and force zeros via complete()
+  group_by(position, orientation, date, Manual_class) %>%
+  summarise(activity = n(), .groups = "drop") %>%
+  complete(Manual_class, nesting(position, orientation, date), fill = list(activity = 0)) %>%
+  mutate(activity_log = log1p(activity)) %>%
+  # Nesting by taxon and spatial factors for independent windowing
+  group_by(Manual_class, position, orientation) %>%
+  nest() %>%
+  mutate(rolling_data = map(data, ~compute_rolling_stability(.x, window_days = 7, daily_step = TRUE))) %>%
+  unnest(rolling_data) %>%
+  ungroup() %>%
+  mutate(time_idx = as.numeric(as.factor(date)))
+```
+
+```{r}
+#| label: plot-stability-trends
+#| fig-width: 12
+#| fig-height: 10
+
+ggplot(stability_results, aes(x = date, y = roll_cv, color = position)) +
+  # Group by orientation to ensure lines connect correctly for each scanner
+  geom_line(aes(group = interaction(position, orientation)), alpha = 0.4) +
+  geom_point(size = 1, alpha = 0.6) +
+  # Facet by Taxon, allowing each to have its own y-axis scale
+  facet_wrap(~Manual_class, scales = "free_y", ncol = 3) +
+  scale_color_manual(values = c("A" = "#228B22", "C" = "#D2691E"), 
+                     labels = c("A" = "Arboreal (A)", "C" = "Cultivated (C)")) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(face = "bold", size = 10),
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(
+    title = "Temporal Dynamics of Population Stability (Rolling 7-Day CV)",
+    subtitle = "Faceted by Taxon: Comparison between Arboreal (A) and Cultivated (C) positions",
+    x = "Date",
+    y = "Coefficient of Variation (SD / Mean)",
+    color = "Land Use Position"
+  )
+```
+
+```{r}
+#| label: stability-summary-table
+
+stability_summary <- stability_results %>%
+  group_by(Manual_class, position) %>%
+  summarise(
+    median_cv = median(roll_cv, na.rm = TRUE),
+    mean_cv = mean(roll_cv, na.rm = TRUE),
+    sd_cv = sd(roll_cv, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+print(stability_summary)
+```
+
+
+Statistical Modeling (H1)
+
+```{r}
+#| label: zero-inflated-models
+# Define a safe model fitting function to handle convergence issues
+fit_zig_model <- function(d) {
+  glmmTMB(
+    roll_cv ~ position + ar1(factor(time_idx) + 0 | orientation),
+    ziformula = ~ position, # Models the probability of being completely stable (CV=0)
+    family = ziGamma(link = "log"),
+    data = d
+  )
+}
+
+# Run nested models per taxon
+taxon_analysis <- stability_results %>%
+  group_by(Manual_class) %>%
+  nest() %>%
+  mutate(model = map(data, possibly(fit_zig_model, otherwise = NULL))) %>%
+  filter(!map_lgl(model, is.null))
+
+# Extract results
+model_summaries <- taxon_analysis %>%
+  mutate(tidied = map(model, tidy, effects = "fixed")) %>%
+  unnest(tidied)
+```
+
+Validation and Visualization
+```{r}
+#| label: validation-and-plot
+
+# Check DHARMa residuals for a representative taxon
+# simulateResiduals(taxon_analysis$model[[1]]) %>% plot()
+
+# Forest Plot of Land-Use Effect (Position C)
+plot_data <- model_summaries %>%
+  filter(component == "cond", term == "positionC") %>%
+  mutate(Manual_class = reorder(Manual_class, estimate))
+
+ggplot(plot_data, aes(x = estimate, y = Manual_class)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "darkgrey") +
+  geom_errorbarh(aes(xmin = estimate - (1.96 * std.error), 
+                     xmax = estimate + (1.96 * std.error)), 
+                 height = 0.2, color = "midnightblue") +
+  geom_point(size = 3, color = "midnightblue") +
+  theme_minimal() +
+  labs(title = "Effect of Cultivated Position (C) on Stability",
+       subtitle = "Estimates > 0 indicate higher CV (lower stability) in C",
+       x = "Effect Size (Log-ratio of CV)", y = "Taxon")
+```
+##HYPOTHESIS 2
+
+```{r}
+#| label: model-class-pipeline
+
+# 1. Prepare Rolling Data for Model_class
+stability_model_ai <- df_complete %>%
+  group_by(Model_class) %>%
+  filter(n() >= min_detections) %>%
+  ungroup() %>%
+  group_by(position, orientation, date, Model_class) %>%
+  summarise(activity = n(), .groups = "drop") %>%
+  complete(Model_class, nesting(position, orientation, date), fill = list(activity = 0)) %>%
+  mutate(activity_log = log1p(activity)) %>%
+  group_by(Model_class, position, orientation) %>%
+  nest() %>%
+  mutate(rolling_data = map(data, ~compute_rolling_stability(.x, window_days = 7, daily_step = TRUE))) %>%
+  unnest(rolling_data) %>%
+  ungroup() %>%
+  mutate(time_idx = as.numeric(as.factor(date)))
+
+# 2. Fit ZIG Models for AI classifications
+taxon_analysis_ai <- stability_model_ai %>%
+  group_by(Model_class) %>%
+  nest() %>%
+  mutate(model = map(data, possibly(fit_zig_model, otherwise = NULL))) %>%
+  filter(!map_lgl(model, is.null))
+```
+
+```{r}
+#| label: h2-comparison-data
+
+# Extract Manual Estimates
+res_manual <- taxon_analysis %>%
+  mutate(tidied = map(model, tidy, effects = "fixed")) %>%
+  unnest(tidied) %>%
+  filter(component == "cond", term == "positionC") %>%
+  select(Taxon = Manual_class, estimate_manual = estimate, se_manual = std.error)
+
+# Extract AI Estimates
+res_ai <- taxon_analysis_ai %>%
+  mutate(tidied = map(model, tidy, effects = "fixed")) %>%
+  unnest(tidied) %>%
+  filter(component == "cond", term == "positionC") %>%
+  select(Taxon = Model_class, estimate_ai = estimate, se_ai = std.error)
+
+# Join for comparison
+h2_comparison <- inner_join(res_manual, res_ai, by = "Taxon")
+
+ggplot(h2_comparison, aes(x = estimate_manual, y = estimate_ai)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  geom_errorbar(aes(ymin = estimate_ai - se_ai, ymax = estimate_ai + se_ai), alpha = 0.3) +
+  geom_errorbarh(aes(xmin = estimate_manual - se_manual, xmax = estimate_manual + se_manual), alpha = 0.3) +
+  geom_point(size = 3, color = "midnightblue") +
+  ggrepel::geom_text_repel(aes(label = Taxon)) +
+  theme_minimal() +
+  labs(title = "Technological Congruence (H2)",
+       subtitle = "Estimated Effect of Land Use (Position C) on CV",
+       x = "Human Estimate (Manual_class)",
+       y = "AI Estimate (Model_class)")
+```
+
