@@ -285,7 +285,7 @@ fit_curve_candidates <- function(df_xy) {
 # -----------------------
 
 # >>> Set your input file here
-in_file <- "images_acquisition/database_calibration.csv"
+in_file <- "images_acquisition/data/database_calibration.csv"
 
 df <- readr::read_csv(in_file, show_col_types = FALSE)
 
