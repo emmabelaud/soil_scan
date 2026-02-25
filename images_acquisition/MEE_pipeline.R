@@ -310,7 +310,7 @@ dat1 <- dat0 %>%
     taxon = dplyr::case_when(
       class_clean %in% c("enchytraeidae","enchytraeid","enchytraeids") ~ "Enchytraeidae",
       class_clean %in% c("collembola","collembolan","collembolans")    ~ "Collembola",
-      class_clean %in% c("acari","mesostigmata","oribatida","prostigmata","astigmata") ~ "Acari",
+      class_clean %in% c("acari","mesostigmata","oribatida","prostigmata","astigmata","trombidiformes","bdelloidea") ~ "Acari",
       TRUE ~ "Other"
     )
   )
