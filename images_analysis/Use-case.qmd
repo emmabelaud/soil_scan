@@ -670,11 +670,6 @@ residual envelopes and tests for: (i) overdispersion, (ii) outliers,
 (iii) zero-inflation misspecification, and (iv) non-uniformity of scaled residuals.
 Convergence is verified via `performance::check_convergence()`.
 
-Note: `r2_nakagawa()` cannot decompose the AR1 random-effect variance in `glmmTMB`
-models and would silently return a biased (fixed-effects-only) value. R² is therefore
-not reported here. Model fit is instead assessed through DHARMa diagnostics and
-the congruence analysis in Section 4.
-
 ```{r}
 #| label: validation-function
 
@@ -718,6 +713,7 @@ not invalidate inference on the land-use fixed effect.
 | Effect_Size | log-ratio of CV: Position C vs. A | Positive = more variable (less stable) in cultivated zone |
 | KS_Unif | Kolmogorov–Smirnov uniformity p-value | p < 0.05 for integer-count taxa is expected; not a failure |
 | Dispersion | DHARMa dispersion test p-value | p < 0.05 indicates Gamma variance assumption may be violated |
+
 
 ```{r}
 #| label: batch-validation
@@ -778,13 +774,12 @@ validation_summary <- taxon_analysis %>%
 ```{r}
 #| label: tbl-validation-styled
 #| tbl-cap: "Summary of Zero-Inflated Gamma models: ecological effect sizes and
-#|           DHARMa diagnostics. Taxa are ordered from the largest to the smallest
-#|           land-use effect (Position C vs. A). Effect sizes are on the log-link
+#|           DHARMa diagnostics. \nTaxa are ordered from the largest to the smallest
+#|           land-use effect (Position C vs. A). \nEffect sizes are on the log-link
 #|           scale: positive values indicate lower stability (higher CV) in the
-#|           cultivated zone. Model Status: 'Robust' = all DHARMa checks passed;
+#|           cultivated zone. \nModel Status: 'Robust' = all DHARMa checks passed;
 #|           'Fallback RI' = AR1 model did not converge and a random-intercept model
-#|           was used instead; 'Non-Convergence' = neither model converged (estimates
-#|           should be interpreted with caution); 'Discrete/Non-Uniform' = expected
+#|           was used instead; 'Discrete/Non-Uniform' = expected
 #|           for integer-count taxa and is not indicative of model misspecification."
 
 # ── Save the arranged table for row_spec indexing ────────────────────────────
@@ -796,7 +791,6 @@ tbl_arranged <- validation_summary %>%
   arrange(desc(Effect))
 
 # Identify rows requiring visual flagging in the final arranged order
-rows_non_conv <- which(tbl_arranged$Status == "Non-Convergence")
 rows_fallback <- which(tbl_arranged$Status == "Fallback RI (no AR1)")
 
 tbl_arranged %>%
