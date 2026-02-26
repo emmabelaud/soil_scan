@@ -134,6 +134,75 @@ extract_glmm_terms <- function(model, label = "model") {
   tibble::as_tibble(out)
 }
 
+# Extract beta coeff
+extract_glmm_betas <- function(model, label = "model") {
+  
+  coefs <- as.data.frame(summary(model)$coefficients$cond)
+  coefs$term <- rownames(coefs)
+  
+  coefs <- dplyr::rename(coefs,
+                         estimate  = Estimate,
+                         std.error = `Std. Error`,
+                         p.value   = `Pr(>|z|)`) %>%
+    dplyr::mutate(
+      label = label,
+      conf.low  = estimate - 1.96 * std.error,
+      conf.high = estimate + 1.96 * std.error
+    ) %>%
+    # ✅ garde tous les coefficients liés à resolution/frequence/interaction
+    dplyr::filter(grepl("^(resolution|frequence)|resolution.*:frequence", term)) %>%
+    # ✅ enlève les NA non-estimables (chez toi: resolution2400:frequence360)
+    dplyr::filter(is.finite(estimate), is.finite(std.error)) %>%
+    dplyr::mutate(
+      estimate  = round(estimate, 3),
+      std.error = round(std.error, 3),
+      conf.low  = round(conf.low, 3),
+      conf.high = round(conf.high, 3),
+      p.value   = round(p.value, 3)
+    ) %>%
+    dplyr::select(label, term, estimate, std.error, conf.low, conf.high, p.value)
+  
+  tibble::as_tibble(coefs)
+}
+
+# Compute Incidence Rate Ratio
+extract_betas_irr <- function(model, label = "model") {
+  
+  coefs <- as.data.frame(summary(model)$coefficients$cond)
+  coefs$term_raw <- rownames(coefs)
+  
+  coefs <- dplyr::rename(coefs,
+                         estimate  = Estimate,
+                         std.error = `Std. Error`) %>%
+    dplyr::mutate(
+      label = label,
+      conf.low  = estimate - 1.96 * std.error,
+      conf.high = estimate + 1.96 * std.error,
+      IRR      = exp(estimate),
+      IRR_low  = exp(conf.low),
+      IRR_high = exp(conf.high)
+    ) %>%
+    dplyr::filter(grepl("^(resolution|frequence)|resolution.*:frequence", term_raw)) %>%
+    dplyr::filter(is.finite(estimate), is.finite(std.error)) %>%
+    dplyr::mutate(
+      term = dplyr::case_when(
+        grepl("^resolution", term_raw) ~ "Resolution",
+        grepl("^frequence",  term_raw) ~ "Frequency",
+        grepl("resolution.*:frequence", term_raw) ~ "Resolution × Frequency",
+        TRUE ~ NA_character_
+      ),
+      estimate  = round(estimate, 3),
+      std.error = round(std.error, 3),
+      conf.low  = round(conf.low, 3),
+      conf.high = round(conf.high, 3),
+      IRR       = round(IRR, 3),
+      IRR_low   = round(IRR_low, 3),
+      IRR_high  = round(IRR_high, 3)
+    ) %>%
+    dplyr::select(label, term, term_raw, estimate, std.error, conf.low, conf.high, IRR, IRR_low, IRR_high)
+  
+  tibble::as_tibble(coefs)
+}
 
 # -----------------------
 # 3) Cumsum curves + candidate curve fitting
@@ -401,8 +470,68 @@ summary(res_coll$model)
 
 
 # -----------------------
-# 8) Extract explanatory power + p-values (LRT)
+# 8) Extract model outputs
 # -----------------------
+p_stars <- function(p){
+  ifelse(is.na(p), "",
+         ifelse(p < 0.001, "***",
+                ifelse(p < 0.01, "**",
+                       ifelse(p < 0.05, "*", "ns"))))
+}
+
+fmt_p <- function(p){
+  ifelse(is.na(p), NA_character_,
+         ifelse(p < 1e-3, format(p, scientific = TRUE, digits = 2),
+                format(round(p, 3), nsmall = 3)))
+}
+fmt_beta_ci <- function(est, lo, hi, digits = 3){
+  est <- round(est, digits); lo <- round(lo, digits); hi <- round(hi, digits)
+  paste0(est, " [", lo, ", ", hi, "]")
+}
+fmt_beta <- function(est, lo, hi) paste0(est, " [", lo, ", ", hi, "]")
+fmt_irr  <- function(irr, lo, hi) paste0(irr, " [", lo, ", ", hi, "]")
+
+collapse_terms <- function(df){
+  df %>%
+    dplyr::mutate(
+      beta_ci = fmt_beta(estimate, conf.low, conf.high),
+      irr_ci  = fmt_irr(IRR, IRR_low, IRR_high)
+    ) %>%
+    dplyr::group_by(label, term) %>%
+    dplyr::summarise(
+      beta_ci = paste0(term_raw, ": ", beta_ci, collapse = "; "),
+      irr_ci  = paste0(term_raw, ": ", irr_ci,  collapse = "; "),
+      .groups = "drop"
+    )
+}
+
+
+Table_betas_cells <- dplyr::bind_rows(
+  extract_glmm_betas(res_total$model, "Total"),
+  extract_glmm_betas(res_ench$model,  "Enchytraeidae"),
+  extract_glmm_betas(res_acar$model,  "Acari"),
+  extract_glmm_betas(res_coll$model,  "Collembola")
+) %>%
+  dplyr::mutate(
+    term = dplyr::recode(term,
+                         "resolution"="Resolution",
+                         "frequence"="Frequency",
+                         "resolution:frequence"="Resolution × Frequency"),
+    beta_ci = fmt_beta_ci(estimate, conf.low, conf.high)
+  ) %>%
+  dplyr::select(label, term, beta_ci) %>%
+  tidyr::pivot_wider(names_from = term, values_from = beta_ci)
+
+Betas_total <- collapse_terms(extract_betas_irr(res_total$model, "Total"))
+Betas_ench  <- collapse_terms(extract_betas_irr(res_ench$model,  "Enchytraeidae"))
+Betas_acar  <- collapse_terms(extract_betas_irr(res_acar$model,  "Acari"))
+Betas_coll  <- collapse_terms(extract_betas_irr(res_coll$model,  "Collembola"))
+
+Table_betas_irr <- dplyr::bind_rows(Betas_total, Betas_ench, Betas_acar, Betas_coll) %>%
+  tidyr::pivot_wider(
+    names_from = term,
+    values_from = c(beta_ci, irr_ci)
+  )
 
 Table_terms <- bind_rows(
   extract_glmm_terms(res_total$model, "Total"),
@@ -419,6 +548,17 @@ Table_terms <- bind_rows(
     p_value = round(p_value, 3)
   ) %>%
   arrange(label, term)
+
+Table_p_typeII <- Table_terms %>%
+  dplyr::mutate(
+    term = dplyr::recode(term,
+                         p_resolution  = "Resolution",
+                         p_frequence   = "Frequency",
+                         p_interaction = "Resolution × Frequency"),
+    p_cell = paste0(fmt_p(p_value), " ", p_stars(p_value))
+  ) %>%
+  dplyr::select(label, term, p_cell) %>%
+  tidyr::pivot_wider(names_from = term, values_from = p_cell, names_prefix = "p_")
 
 
 safe_num <- function(x) ifelse(is.finite(x), x, NA_real_)
@@ -458,32 +598,93 @@ extract_model_quality <- function(model, label){
   )
 }
 
-p_stars <- function(p){
-  ifelse(is.na(p), "",
-         ifelse(p < 0.001, "***",
-                ifelse(p < 0.01, "**",
-                       ifelse(p < 0.05, "*", "ns"))))
-}
-fmt_p <- function(p){
-  ifelse(is.na(p), NA_character_,
-         ifelse(p < 1e-3, format(p, scientific = TRUE, digits = 2),
-                format(round(p, 3), nsmall = 3)))
-}
+Table_quality <- dplyr::bind_rows(
+  extract_model_quality(res_total$model, "Total"),
+  extract_model_quality(res_ench$model,  "Enchytraeidae"),
+  extract_model_quality(res_acar$model,  "Acari"),
+  extract_model_quality(res_coll$model,  "Collembola")
+)
 
-Table_fixed_effects <- Table_terms %>%
-  mutate(
-    term = recode(term,
-                  p_resolution  = "Resolution",
-                  p_frequence   = "Frequency",
-                  p_interaction = "Resolution × Frequency"),
-    cell = paste0(fmt_p(p_value), " ", p_stars(p_value))
+Table_model_terms <- Table_betas_irr %>%
+  dplyr::left_join(Table_p_typeII, by = "label") %>%
+  dplyr::arrange(factor(label, levels=c("Total","Enchytraeidae","Acari","Collembola")))
+
+Table_main <- Table_terms %>%
+  dplyr::mutate(
+    term = dplyr::recode(term,
+                         p_resolution  = "Resolution",
+                         p_frequence   = "Frequency",
+                         p_interaction = "Resolution × Frequency"),
+    p = fmt_p(p_value),
+    sig = p_stars(p_value),
+    p_cell = paste0(p, " ", sig)
   ) %>%
-  select(label, term, cell) %>%
-  tidyr::pivot_wider(names_from = term, values_from = cell) %>%
-  arrange(factor(label, levels=c("Total","Enchytraeidae","Acari","Collembola")))
+  dplyr::select(label, term, p_cell) %>%
+  tidyr::pivot_wider(names_from = term, values_from = p_cell) %>%
+  dplyr::left_join(
+    Table_quality %>% dplyr::select(label, R2_marginal, AIC, BIC),
+    by = "label"
+  ) %>%
+  dplyr::arrange(factor(label, levels=c("Total","Enchytraeidae","Acari","Collembola")))
 
-readr::write_csv(Table_terms, "images_acquisition/Tables/Table_fixed_effects.csv")
+# Option: jolis noms de colonnes
+Table_main <- Table_main %>%
+  dplyr::rename(
+    `p (Resolution)` = Resolution,
+    `p (Frequency)`  = Frequency,
+    `p (Res × Freq)` = `Resolution × Frequency`,
+    `R²m` = R2_marginal
+  )
 
+
+readr::write_csv(Table_model_terms, "images_acquisition/Tables/Table_model_summary.csv")
+
+# ---- SI table: IRR per contrast (readable) ----
+
+extract_contrast_irr <- function(model, label){
+  
+  mf <- model.frame(model)
+  ref_res <- levels(mf$resolution)[1]
+  ref_frq <- levels(mf$frequence)[1]
+  
+  coefs <- as.data.frame(summary(model)$coefficients$cond)
+  coefs$term_raw <- rownames(coefs)
+  
+  coefs %>%
+    dplyr::rename(estimate = Estimate, se = `Std. Error`) %>%
+    dplyr::filter(grepl("^(resolution|frequence)|resolution.*:frequence", term_raw)) %>%
+    dplyr::filter(is.finite(estimate), is.finite(se)) %>%  # retire les NA non estimables
+    dplyr::mutate(
+      label = label,
+      lo = estimate - 1.96 * se,
+      hi = estimate + 1.96 * se,
+      IRR = exp(estimate),
+      IRR_lo = exp(lo),
+      IRR_hi = exp(hi),
+      Class = dplyr::case_when(
+        grepl("^resolution", term_raw) ~ "Resolution",
+        grepl("^frequence",  term_raw) ~ "Frequency",
+        TRUE ~ "Resolution × Frequency"
+      ),
+      Contrast = dplyr::case_when(
+        grepl("^resolution", term_raw) ~ paste0(sub("^resolution","", term_raw), " vs ", ref_res),
+        grepl("^frequence", term_raw)  ~ paste0(sub("^frequence","", term_raw), " vs ", ref_frq),
+        TRUE ~ term_raw
+      ),
+      `IRR (95% CI)` = paste0(round(IRR, 2), " (", round(IRR_lo, 2), "–", round(IRR_hi, 2), ")")
+    ) %>%
+    dplyr::select(label, Class, Contrast, `IRR (95% CI)`)
+}
+
+Table_SI_irr <- dplyr::bind_rows(
+  extract_contrast_irr(res_total$model, "Total"),
+  extract_contrast_irr(res_ench$model,  "Enchytraeidae"),
+  extract_contrast_irr(res_acar$model,  "Acari"),
+  extract_contrast_irr(res_coll$model,  "Collembola")
+) %>%
+  dplyr::arrange(factor(label, levels=c("Total","Enchytraeidae","Acari","Collembola")), Class, Contrast)
+
+readr::write_csv(Table_SI_irr, "images_acquisition/Tables/Table_SI_IRR_contrasts.csv")
 
 # -----------------------
 # 9) Ratio table (resolution gains) — adapted from your second script
@@ -1346,6 +1547,41 @@ extract_model_quality <- function(model, label){
   )
 }
 
+Table_quality <- dplyr::bind_rows(
+  extract_model_quality(res_total$model, "Total"),
+  extract_model_quality(res_ench$model,  "Enchytraeidae"),
+  extract_model_quality(res_acar$model,  "Acari"),
+  extract_model_quality(res_coll$model,  "Collembola")
+)
+
+Table_model_summary <- Table_betas_cells %>%
+  dplyr::left_join(Table_p_cells, by = "label", suffix = c("_beta", "_p")) %>%
+  dplyr::left_join(Table_quality, by = "label")
+
+# Option: construire des colonnes combinées β[CI] (p)
+combine_beta_p <- function(beta, p){
+  ifelse(is.na(beta), NA_character_, paste0(beta, " (p=", p, ")"))
+}
+
+Table_model_summary <- Table_model_summary %>%
+  dplyr::mutate(
+    `Resolution` = combine_beta_p(Resolution_beta, Resolution_p),
+    `Frequency`  = combine_beta_p(Frequency_beta,  Frequency_p),
+    `Resolution × Frequency` = combine_beta_p(`Resolution × Frequency_beta`, `Resolution × Frequency_p`)
+  ) %>%
+  dplyr::select(
+    label,
+    `Resolution`, `Frequency`, `Resolution × Frequency`,
+    R2_marginal, R2_conditional, sd_bac, sd_cycle, AIC, BIC
+  ) %>%
+  dplyr::arrange(factor(label, levels=c("Total","Enchytraeidae","Acari","Collembola")))
+
+readr::write_csv(Table_model_summary, "images_acquisition/Tables/Table_model_summary.csv")
+
+
+
+### A enlever ######
+
 p_stars <- function(p){
   ifelse(is.na(p), "",
          ifelse(p < 0.001, "***",
@@ -1371,7 +1607,7 @@ Table_fixed_effects <- Table_terms %>%
   arrange(factor(label, levels=c("Total","Enchytraeidae","Acari","Collembola")))
 
 readr::write_csv(Table_terms, "images_acquisition/Tables/Table_fixed_effects.csv")
-
+##################################
 
 # -----------------------
 # 9) Ratio table (resolution gains) — adapted from your second script
