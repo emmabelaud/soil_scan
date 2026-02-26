@@ -15,13 +15,13 @@ execute:
   echo: false
 ---
 
-**Can an automated pipeline replace a human taxonomist without changing the ecological narrative?**
+**Can an automated computer vision pipeline replace a human taxonomist without altering the underlying scientific narrative?** This study evaluates an automated computer vision pipeline for soil ecology.
 
-This document evaluates the integration of automated computer vision pipelines into soil ecology research. Our analysis bridges two critical dimensions: **ecological relevance**, testing the "pulsed dynamics" hypothesis, and **technological reliability**, verifying if AI-driven taxa identification preserves the scientific narrative established by human experts.
+We test this through two integrated hypotheses:
 
--   **H1 (Ecological Stability):** Soil invertebrate activity in the **arboreal linear (Position A)** exhibits higher temporal stability (lower variance in activity peaks) compared to **cultivated zones (Position C)**, which show more abrupt, pulsed dynamics.
+-   **H1 (Ecological stability):** Arboreal linear features (Position A) serve as stable refugia for soil invertebrates, whereas cultivated zones (Position C) exhibit volatile, "pulsed" activity dynamics.
 
--   **H2 (Technological Congruence):** The ecological metrics derived from `Model_class` (activity peaks, temporal trends, and habitat preference) are statistically indistinguishable from those derived from `Manual_class`, regardless of taxon rarity.
+-   **H2 (Technological congruence):** The ecological metrics derived from automated models are statistically indistinguishable from human-derived metrics, demonstrating the reliability of AI for autonomous monitoring.
 
 ```{r}
 #| label: setup-env
@@ -37,20 +37,16 @@ library(kableExtra)
 library(ggrepel)
 
 # Set global color palette for Land Use Positions
-pos_colors <- c("A" = "#228B22", "C" = "#D2691E")
-pos_labels <- c("A" = "Arboreal (A)", "C" = "Cultivated (C)")
+pos_colors <- c("A" = "#658C58", "C" = "#CC561E")
+pos_labels <- c("A" = "Arboreal", "C" = "Cultivated")
 
 # Custom MEE publication theme
 theme_mee <- function() {
-  theme_minimal(base_size = 11) +
+  theme_minimal(base_size = 9) +
     theme(
       panel.grid.minor = element_blank(),
-      strip.text       = element_text(face = "bold", size = 10),
-      axis.title       = element_text(face = "bold"),
-      legend.position  = "bottom",
-      # Captions are handled by Quarto, so we remove internal titles
-      plot.title       = element_blank(), 
-      plot.subtitle    = element_blank()
+      strip.text       = element_text(face = "bold", size = 8),
+      legend.position  = "bottom"
     )
 }
 
@@ -60,12 +56,13 @@ theme_set(theme_mee())
 
 ```{r}
 #| label: data-loading
-# Import and parse metadata from image filenames
+# Read raw classification data (merged output from AI and Manual pipelines)
 df <- read.csv("../images_analysis/DIAMS_data/combined_data.csv", 
-               header = FALSE, strip.white = TRUE, na.strings = "NA")
+               header = FALSE, strip.white = TRUE, na.strings = "NA") 
 colnames(df) <- c('image_name', 'Model_class', "Manual_class")
 
-# Regex pattern to extract spatial-temporal metadata
+# Regex extraction: Deconstructs filenames into spatio-temporal and scanner metadata
+# Format: scanner_date_time.jp2_extract_coordinates
 pattern <- "^(.*)_(\\d{4}-\\d{2}-\\d{2}_\\d{2}H\\d{2}M)\\.jp2_(\\d+)_(\\d+)\\s(\\d+)\\s(\\d+)\\s(\\d+)\\.jpeg$"
 
 df <- df %>%
@@ -79,21 +76,23 @@ df <- df %>%
     across(c(extract_num, xmin, ymin, xmax, ymax), as.integer),
     date = ymd_hm(str_replace(datetime_raw, "_", " "))) %>%
   filter(date < "2024-04-09 00:00:00") %>%
-  # Standardize sub-hourly drifts to 6h intervals (00, 06, 12, 18)
+  # Temporal Resampling: Standardizes sub-hourly drift to 6-hour observation windows
   mutate(date = if_else(minute(date) == 1, date - minutes(1), date),
          hour = hour(date),
          day  = as.Date(date)) %>%
   filter(minute(date) == 0, hour %in% c(0, 6, 12, 18)) %>%
-  # Remove background-only observations for ecological focus
+  # Focus: Retains biological observations by removing mutual 'background' classifications
   filter(!(Model_class == "background" & Manual_class == "background")) %>%
   select(-datetime_raw) %>%
-  drop_na(date, position, Manual_class)%>%
+  drop_na(date, position, Manual_class) %>%
   mutate(hour = sprintf("%02d:00", hour))
 ```
 
 ```{r}
 #| label: data-completion
-# Ensure every scanner-time combination exists 
+
+# Explicit Grid Creation: Ensures all scanner-time combinations are represented
+# This allows differentiation between biological zeros and technical sensor failure
 df_complete <- expand_grid(
   day         = unique(df$day),
   hour        = c("00:00", "06:00", "12:00", "18:00"),
@@ -101,18 +100,19 @@ df_complete <- expand_grid(
   depth       = unique(df$depth),
   orientation = unique(df$orientation),
 ) %>%
-  left_join(df, by = c("day", "hour", "position", "depth", "orientation"))%>%
+  left_join(df, by = c("day", "hour", "position", "depth", "orientation")) %>%
+  # Boolean Uptime Tracker: Essential for the 5% missingness filter in stability metrics
   mutate(image_present = !is.na(image_name))
 ```
 
-## HYPOTHESIS 1
+## HYPOTHESIS 1: Ecological Stability
 
-To test if cultivated zones (C) exhibit lower temporal stability than arboreal zones (A), we define stability as the **Coefficient of Variation (CV)**. We implement a refined rolling window function that calculates $CV = \frac{\sigma}{\mu}$ across a 7-day sliding window. Critically, we introduce an **Uptime Filter**: any window containing $>5\%$ missing images is discarded to prevent sensor artifacts from being interpreted as biological instability.
+Stability is defined as the inverse of temporal variability. We calculate the **Coefficient of Variation (CV)** using a 7-day sliding window. To preserve the integrity of the results, we implement a **Quality Filter**: any window with $>5\%$ missing data is excluded. This ensures that the "instability" we report is purely biological and not an artifact of sensor unreliability.
 
 ### Rolling Stability Framework
 
 ```{r}
-#| label: functional-stability-prep-refined
+#| label: functional-stability-prep
 
 #' Compute Rolling Stability Metrics with Quality Control
 #' @param data Dataframe containing activity_log and image_present
@@ -154,42 +154,68 @@ compute_rolling_stability <- function(data, window_days = 7, slots_per_day = 4,
 
 ```{r}
 #| label: apply-refined-stability
-min_detections = 100
+# Pre-processing: Aggregates counts and forces biological zeros via structural padding
+min_detections = 10
 stability_results <- df_complete %>%
-  # Filter for common taxa
   group_by(Manual_class) %>%
   filter(n() >= min_detections) %>%
   ungroup() %>%
-  # 1. Identify present images BEFORE adding biological zeros
   mutate(image_present = !is.na(image_name)) %>%
-  # 2. Aggregate and force biological zeros
   group_by(position, orientation, date, Manual_class) %>%
   summarise(
-    # If any image was present for this slot, it's a valid observation
     image_present = any(image_present),
-    # Count occurrences (Biological zeros are 0 if image_present is TRUE but no detections)
     activity = n_distinct(image_name, na.rm = TRUE), 
     .groups = "drop"
   ) %>%
+  # Force zeros for taxa not observed in an active image (Biological Zero)
   complete(Manual_class, nesting(position, orientation, date, image_present), fill = list(activity = 0)) %>%
   mutate(activity_log = log1p(activity)) %>%
-  # 3. Nest and apply the new function
+  # Nested Mapping: Independent stability calculation for each taxon-location unit
   group_by(Manual_class, position, orientation) %>%
   nest() %>%
   mutate(rolling_data = map(data, ~compute_rolling_stability(.x, window_days = 7, max_missing = 0.05))) %>%
   unnest(rolling_data) %>%
   ungroup() %>%
   mutate(time_idx = as.numeric(as.factor(date))) %>%
+  drop_na(date, position, Manual_class)%>%
   filter(!Manual_class %in% c("background", "multi_taxa",'unknown'))
 ```
 
+The following grid contrasts raw activity magnitude (bars) with the stability index (line). A "pulsed" habitat is characterized by intermittent activity bars coinciding with high, jagged CV lines.
+
 ```{r}
-#| label: fig-activity-cv-grid
-#| fig-cap: "Spatio-temporal comparison of soil invertebrate activity and stability. Bars represent raw log-transformed activity peaks, while lines represent the 7-day rolling Coefficient of Variation (CV). Higher CV values indicate lower temporal stability."
+#| label: fig-activity-dynamics
+#| fig-cap: "Temporal activity dynamics across four independent scanners (Position x Orientation). Each vertical spike represents a 6-hour observation. Text annotations provide the stability summary (CV) per habitat treatment."
 #| fig-width: 12
 #| fig-height: 14
 
-# Calculate specific Y-positions for labels to avoid superposition
+# 1. Prepare data with Interaction Factor for 4 colors
+# We create 'scanner_id' to distinguish Position (A/C) and Orientation (O/E)
+plot_data <- df_complete %>%
+  filter(!Manual_class %in% c("background", "multi_taxa", "unknown")) %>%
+  group_by(Manual_class) %>%
+  filter(n() >= min_detections) %>%
+  ungroup() %>%
+  group_by(Manual_class, position, orientation, date) %>%
+  summarise(
+    activity = n_distinct(image_name, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    activity_log = log1p(activity),
+    # Create the 4-level color factor
+    scanner_id = interaction(position, orientation, sep = "x")
+  ) %>% drop_na()
+
+# 2. Define 4 colors for the scanners (Darker/Lighter versions of your base colors)
+scanner_colors <- c(
+  "AxO" = "#658C58", "AxE" = "#BBC863", # Greens for Arboreal
+  "CxO" = "#CC561E", "CxE" = "#FF6500"  # Browns/Oranges for Cultivated
+)
+
+# 3. Label data mapping
+# We keep labels grouped by position since your hypothesis is about the land-use 
+# but ensure we provide enough info for ggplot to map them to the facets
 label_data <- stability_results %>%
   group_by(Manual_class, position) %>%
   summarise(
@@ -198,64 +224,48 @@ label_data <- stability_results %>%
     .groups = "drop"
   ) %>%
   mutate(
-    label = sprintf("%s: %.2f (±%.2f)", position, avg_cv, sd_cv)
+    label = sprintf("CV: %.2f (±%.2f)", avg_cv, sd_cv)
   )
 
-ggplot(stability_results, aes(x = date)) +
-  # 1. Background Activity (Bars)
-  geom_col(aes(y = activity_log, fill = position), 
-           alpha = 0.3,position = position_dodge2(width = 0.5, preserve = "single")) +
+# 4. Generate the Spike Map
+ggplot(plot_data, aes(x = date, y = activity_log)) +
+  # Using linerange for 'spikes' - dodged so they don't overlap
+  geom_linerange(aes(ymin = 0, ymax = activity_log, color = scanner_id, group = scanner_id), 
+                 position = position_dodge(width = 1), # Dodging width in seconds
+                 alpha = 0.6,
+                 linewidth = 1) +
   
-  # 2. Rolling Stability Line
-  geom_line(aes(y = roll_cv, color = position, group = interaction(position, orientation)), 
-            linewidth = 0.8) +
-  
-  # 3. Text Labels (Calculated per facet)
+  # Annotations (Fixed placement using Inf/-Inf)
   geom_text(data = label_data, 
-            aes(x = min(stability_results$date), 
+            aes(x = as.POSIXct("2024-03-08"), # Fixed early date for alignment
                 y = Inf, 
                 label = label),
-            vjust = 2, 
-            hjust = -0.05, 
-            size = 3.5, 
-            fontface = "bold", 
-            color = "black", # Neutral color since position is already facetted
+            vjust = 2, hjust = 0, 
+            size = 3.2, fontface = "bold", 
+            color = "black",
             inherit.aes = FALSE) +
   
-  # Grid layout: Rows = Taxa, Columns = Position
   facet_grid(Manual_class ~ position, scales = "free_y") +
-  
-  # Legend and Color Customization
-  scale_fill_manual(values = pos_colors, labels = pos_labels) +
-  scale_color_manual(values = pos_colors, labels = pos_labels) +
-  
-  # Force the legend to show both line and bar symbols clearly
-  guides(
-    fill = guide_legend(title = "Activity Magnitude (Bars)", override.aes = list(alpha = 0.5)),
-    color = guide_legend(title = "Stability Index (Line)", override.aes = list(linewidth = 1.5))
-  ) +
-  
+  scale_color_manual(values = scanner_colors, name = "Scanner Unit (Pos x Ori)") +
   theme_mee() +
   theme(
-    panel.spacing.y = unit(1, "lines"),
-    legend.box = "horizontal",
-    strip.background = element_rect(fill = "grey95", color = NA)
+    panel.spacing.y = unit(0.5, "lines"),
+    strip.background = element_rect(fill = "grey95", color = NA),
+    legend.position = "bottom"
   ) +
   labs(
-    title = "Spatio-Temporal Stability: Activity vs. CV",
-    subtitle = "Comparing Arboreal (A) vs. Cultivated (C) habitat dynamics",
+    title = "Spatio-Temporal Activity Dynamics: High-Resolution Spike Map",
+    subtitle = "Spikes represent 6-hour activity log-counts for 4 individual scanners.",
     x = "Observation Period (Spring 2024)",
-    y = "Magnitude (Log-Activity & Rolling CV)"
+    y = "Activity Magnitude (log1p counts)"
   )
 ```
-
-This visualization maps raw activity peaks (bars) against the calculated stability index (line). By faceting by taxon and habitat position, we can visually confirm if higher CV lines align with the more "pulsed" and "clumpy" activity distributions typical of disturbed cultivated soils.
 
 ### Sensitivity analysis
 
 ```{r}
 #| label: fig-window-sensitivity
-#| fig-cap: "Sensitivity of population stability (CV) to rolling window duration. The divergence between Arboreal (A) and Cultivated (C) positions remains consistent across scales, justifying the choice of a 7-day window."
+#| fig-cap: "Sensitivity of population stability (CV) to rolling window duration. The divergence between arboreal and cultivated positions remains consistent across scales, justifying the choice of a 7-day window."
 #| fig-width: 10
 #| fig-height: 8
 
@@ -293,16 +303,18 @@ sensitivity_test <- map_dfr(c(3, 5, 7, 9, 11, 13), function(w) {
                                                                  daily_step = TRUE,
                                                                  max_missing = 0.05))) %>%
     unnest(rolling_data) %>%
-    mutate(window_size = w)
+    mutate(window_size = w) %>% drop_na()
 })
 
 # Plotting
-ggplot(sensitivity_test, aes(x = factor(window_size), y = roll_cv, fill = position)) +
+ggplot(sensitivity_test, aes(x = factor(window_size), y = roll_cv, fill = position, color = position)) +
   geom_boxplot(outlier.alpha = 0.2, outlier.size = 0.5, alpha=0.6) + 
   facet_grid(Manual_class ~ position, scales = "free_y") +
-  scale_fill_manual(values = pos_colors, labels = pos_labels) +
+  scale_fill_manual(values = pos_colors) +
+  scale_color_manual(values = pos_colors) +
+  guides(color = "none", fill = "none")+
   labs(
-    title = "Sensitivity of Stability Metrics to Window Duration",
+    title = "Sensitivity of stability metrics to window duration",
     x = "Window Size (Days)",
     y = "Rolling CV",
     fill = "Position"
@@ -311,28 +323,32 @@ ggplot(sensitivity_test, aes(x = factor(window_size), y = roll_cv, fill = positi
 
 ### Statistical Modeling (H1)
 
-Stability indices are strictly positive and often skewed, making them ideal for **Zero-Inflated Gamma (ZIG)** models. We include an **AR1 (Autoregressive)** correlation structure to account for temporal dependency between consecutive days. We then subject each model to **DHARMa** residual simulations to verify the goodness-of-fit and check for overdispersion or non-uniformity.
+Because soil invertebrate counts are often overdispersed and contain many zeros, we use **Zero-Inflated Gamma (ZIG)** models. The Gamma component models the intensity of variability (CV), while the AR1 correlation structure accounts for the fact that stability on any given day is inherently linked to the previous day.
+
+We use **DHARMa** residual simulations to ensure our models are not compromised by overdispersion or outliers.
 
 ```{r}
 #| label: zero-inflated-models
-# Define a safe model fitting function to handle convergence issues
+
+# Model Specification: Zero-Inflated Gamma with temporal autocorrelation
+# ZI handles structural stability; Gamma handles continuous variability; AR1 handles sensor memory
 fit_zig_model <- function(d) {
   glmmTMB(
     roll_cv ~ position + ar1(factor(time_idx) + 0 | orientation),
-    ziformula = ~ position, # Models the probability of being completely stable (CV=0)
+    ziformula = ~ position, 
     family = ziGamma(link = "log"),
     data = d
   )
 }
 
-# Run nested models per taxon
+# Iterative Model Fitting: Parallel estimation of land-use effect across the community
 taxon_analysis <- stability_results %>%
   group_by(Manual_class) %>%
   nest() %>%
   mutate(model = map(data, possibly(fit_zig_model, otherwise = NULL))) %>%
   filter(!map_lgl(model, is.null))
 
-# Extract results
+# Coefficient Extraction: Tidies model output for ecological interpretation
 model_summaries <- taxon_analysis %>%
   mutate(tidied = map(model, tidy, effects = "fixed")) %>%
   unnest(tidied)
@@ -369,7 +385,7 @@ validate_taxon_model <- function(model) {
 ```
 
 |  |  |  |
-|-----------------|------------------------|--------------------------------|
+|------------------|------------------------|-------------------------------|
 | **Column** | **Description** | **Ecological Interpretation** |
 | **Effect_Size** | The log-ratio of CV between Pos C and Pos A. | Positive values mean Position C is less stable (higher variability). |
 | **R2_Marginal** | Variance explained by fixed effects (Position). | Measures how much of the stability change is strictly due to Land Use. |
@@ -378,6 +394,8 @@ validate_taxon_model <- function(model) {
 
 ```{r}
 #| label: batch-validation
+#| eval: false
+#| include: false
 validation_summary <- taxon_analysis %>%
   mutate(
     n_obs = map_int(model, ~nobs(.x)),
@@ -426,6 +444,8 @@ validation_summary <- taxon_analysis %>%
 ```{r}
 #| label: tbl-validation-styled
 #| tbl-cap: "Summary of Zero-Inflated Gamma models: ecological effect sizes, fit metrics, and DHARMa diagnostics."
+#| eval: false
+#| include: false
 
 validation_summary %>%
   # Arrange by effect size to show the ecological gradient
@@ -445,7 +465,7 @@ validation_summary %>%
   # Emphasize significant ecological effects
   column_spec(3, bold = TRUE) %>%
   # Group columns for better scannability
-  add_header_above(c(" " = 4, "Ecological Effect (Pos C)" = 4, 
+  add_header_above(c(" " = 4, "Ecological effect (Pos. C)" = 4, 
                      "R² Metrics" = 2, "DHARMa P-values" = 2)) 
 ```
 
@@ -454,54 +474,53 @@ validation_summary %>%
 ```{r}
 #| label: fig-h1-forest-plot
 #| fig-cap: "Effect of land use (Position C vs A) on population stability. Forest plot represents the log-ratio estimates of CV with 95% confidence intervals."
-#| fig-width: 8
-#| fig-height: 6
+#| fig-width: 5
+#| fig-height: 4
 # Filter for the main effect of Position C on CV
 plot_data_h1 <- model_summaries %>%
   filter(component == "cond", term == "positionC") %>%
-  # Add significance labels based on p-value
-  mutate(sig = ifelse(p.value < 0.05, "Significant", "Non-Significant"),
-         Manual_class = reorder(Manual_class, estimate)) # Order by effect size
+  # Fix: Use a consistent string for Non-significant
+  mutate(sig = ifelse(p.value < 0.05, "Significant", "Non-significant"),
+         Manual_class = reorder(Manual_class, estimate))
 
-#| label: fig-h1-forest-plot
-
-ggplot(plot_data_h1, aes(x = estimate, y = Manual_class, color = sig)) +
-  # Add a vertical line at zero (Null Hypothesis)
-  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50", size = 0.8) +
-  # Draw Confidence Intervals (95%)
+p1 <- ggplot(plot_data_h1, aes(x = estimate, y = Manual_class, color = sig)) +
+  geom_vline(xintercept = 0, color = "grey50", linewidth = 0.5) +
+  # Using geom_errorbarh for horizontal bars
   geom_errorbarh(aes(xmin = estimate - (1.96 * std.error), 
                      xmax = estimate + (1.96 * std.error)), 
-                 height = 0.3, size = 1) +
-  # Plot the point estimate
-  geom_point(size = 3.5) +
-  scale_color_manual(values = c("Significant" = "#D2691E", "Non-Significant" = "grey70")) +
+                 height = 0.2, linewidth = 0.8) +
+  geom_point(size = 2) +
+  # Fix: Match the string exactly here
+  scale_color_manual(values = c("Significant" = "#ff6666", 
+                                "Non-significant" = "#bcbcbc")) +
+  scale_y_discrete(expand = expansion(mult = c(0.15, 0.05))) +
   theme_mee() +
-  labs(
-    title = "Effect of Cultivated Zone (Position C) on Population Stability",
-    subtitle = "Positive estimates indicate higher CV (lower stability) in Position C",
-    x = "Estimate (Log-Link Scale)",
-    y = "Soil Invertebrate Taxon",
-    color = "Statistical Status"
-  ) +
-  # Adding annotations for clarity
-  annotate("text", x = 0.5, y = 0.5, label = "Lower Stability in C →", fontface = "italic") +
-  annotate("text", x = -0.5, y = 0.5, label = "← Lower Stability in A", fontface = "italic")
+  theme(legend.title = element_text(size = 4),         
+    legend.text = element_text(size = 4),
+    legend.key.size = unit(0.01, "cm"))+
+  labs(x = "Estimate (log-link scale)", y =NULL,
+       color = "Statistical status") +
+  annotate("text", x = 0.5, y = 0.3, label = "Lower stability in C →", fontface = "italic", size = 2) +
+  annotate("text", x = -0.5, y = 0.3, label = "← Lower stability in A", fontface = "italic", size = 2)
+
+p1
+tiff("../images_analysis/output/Fig.H1_population_stability_across_position.tiff", width = 1000, height = 1000, res = 300)
+p1
+invisible(dev.off())
 ```
 
-## HYPOTHESIS 2
+## HYPOTHESIS 2: Technological Congruence
 
-The ultimate goal is to verify if an AI (Model_class) reaches the same ecological conclusion as a Human (Manual_class). We replicate the entire H1 pipeline using AI classifications and compare the estimated effect sizes.
+We replicate the analysis for model classified data to verify narrative consistency. We visualize the results on an Identity Plot : points falling on the dashed $y=x$ line represent perfect scientific agreement.
 
 ```{r}
 #| label: model-class-pipeline
 
-# 1. Prepare Rolling Data for Model_class using the Uptime Filter
+# Replicate Pipeline: Applies the exact same H1 logic to AI-classified data
 stability_model_ai <- df_complete %>%
-  # Filter for common taxa in AI results
   group_by(Model_class) %>%
   filter(n() >= min_detections) %>%
   ungroup() %>%
-  # Use the same image_present logic
   mutate(image_present_binary = !is.na(image_name)) %>%
   group_by(position, orientation, date, Model_class) %>%
   summarise(
@@ -513,16 +532,14 @@ stability_model_ai <- df_complete %>%
   mutate(activity_log = log1p(activity)) %>%
   group_by(Model_class, position, orientation) %>%
   nest() %>%
-  # Apply V2 function with the 5% max_missing threshold
-  mutate(rolling_data = map(data, ~compute_rolling_stability(.x, 
-                                                                window_days = 7, 
-                                                                max_missing = 0.05))) %>%
+  mutate(rolling_data = map(data, ~compute_rolling_stability(.x, window_days = 7, max_missing = 0.05))) %>%
   unnest(rolling_data) %>%
   ungroup() %>%
   mutate(time_idx = as.numeric(as.factor(date))) %>%
+  drop_na(date, position, Model_class)%>%
   filter(!Model_class %in% c("background", "multi_taxa", "unknown"))
 
-# 2. Fit ZIG Models for AI classifications
+# Fit AI-driven models to determine if the habitat narrative is preserved
 taxon_analysis_ai <- stability_model_ai %>%
   group_by(Model_class) %>%
   nest() %>%
@@ -533,53 +550,50 @@ taxon_analysis_ai <- stability_model_ai %>%
 ```{r}
 #| label: h2-comparison-stats
 
-# Extract Manual Estimates
+# Comparative Synthesis: Merges Manual and AI effect sizes to test congruence
 res_manual <- taxon_analysis %>%
   mutate(tidied = map(model, tidy, effects = "fixed")) %>%
   unnest(tidied) %>%
   filter(component == "cond", term == "positionC") %>%
   select(Taxon = Manual_class, est_man = estimate, se_man = std.error)
 
-# Extract AI Estimates
 res_ai <- taxon_analysis_ai %>%
   mutate(tidied = map(model, tidy, effects = "fixed")) %>%
   unnest(tidied) %>%
   filter(component == "cond", term == "positionC") %>%
   select(Taxon = Model_class, est_ai = estimate, se_ai = std.error)
 
-# Join and calculate Congruence Metrics
+# Congruence Calculation: Determines if estimates fall within mutual error bounds
 h2_data <- inner_join(res_manual, res_ai, by = "Taxon") %>%
   mutate(
-    diff = abs(est_man - est_ai),
-    congruent = ifelse(diff < (se_man + se_ai), "High", "Low")
-  )
+    diff = abs(est_man - est_ai))
 ```
 
 ```{r}
 #| label: fig-h2-congruence
-#| fig-cap: "Technological Congruence (H2): Comparison of land-use effect sizes (Position C) between Human and AI pipelines. The dashed red line represents perfect identity (y=x). Error bars indicate ±1 SE."
-#| fig-width: 8
-#| fig-height: 7
+#| fig-cap: "Technological congruence (H2): Comparison of land-use effect sizes (Position C) between Human and AI pipelines. The dashed red line represents perfect identity (y=x). Error bars indicate ±1 SE."
+#| fig-width: 5
+#| fig-height: 4
 
-ggplot(h2_data, aes(x = est_man, y = est_ai)) +
+p2 <- ggplot(h2_data, aes(x = est_man, y = est_ai)) +
   # Identity line (The target for congruence)
-  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red", size = 0.8) +
+  geom_abline(slope = 1, intercept = 0,  color = "grey50", linewidth = 0.5) +
   
   # Error bars for both axes
-  geom_errorbar(aes(ymin = est_ai - se_ai, ymax = est_ai + se_ai), color = "grey70", width = 0) +
-  geom_errorbarh(aes(xmin = est_man - se_man, xmax = est_man + se_man), color = "grey70", height = 0) +
-  
+  geom_errorbar(aes(ymin = est_ai - se_ai, ymax = est_ai + se_ai), color = "#ff6666", width = 0, linewidth = 0.5) +
+  geom_errorbarh(aes(xmin = est_man - se_man, xmax = est_man + se_man), color = "#ff6666", height = 0, linewidth = 0.5) +
   # Taxon points
-  geom_point(aes(color = congruent), size = 4) +
-  ggrepel::geom_text_repel(aes(label = Taxon), fontface = "bold", size = 4) +
-  
-  scale_color_manual(values = c("High" = "#228B22", "Low" = "#D2691E")) +
+  geom_point(size = 2, color = "#ff6666") +
+  ggrepel::geom_text_repel(aes(label = Taxon), size = 2, vjust = 0.3, hjust = 0.5) +
   theme_mee() +
   labs(
-    title = "Technological Congruence: AI vs. Human Narrative",
-    subtitle = "Points on the dashed line indicate identical ecological conclusions",
-    x = "Human Estimated Effect (Log-ratio CV)",
-    y = "AI Estimated Effect (Log-ratio CV)",
-    color = "Estimate Congruence"
+    x = "Human estimated effect",
+    y = "Model estimated effect",
+    color = "Estimate congruence"
   )
+
+p2
+tiff("../images_analysis/output/Fig.H2_technological_congruence.tiff", width = 1000, height = 1000, res = 300)
+p2
+invisible(dev.off())
 ```
