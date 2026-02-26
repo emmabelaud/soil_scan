@@ -18,7 +18,7 @@ Focusing on three major taxonomic groups (Acari, Collembola, and Enchytraeidae),
 
 ## Image analysis
 
-The [image_analysis](https://github.com/emmabelaud/soil_scan/tree/30b0c6e3ef320dadd86181c5e8fc15f40663755e/images_analysis) folder contains all code and data associated with the paper *"Automated processing for in situ soil monitoring: from raw images to population dynamics"*.
+The [image_analysis](https://github.com/emmabelaud/soil_scan/tree/30b0c6e3ef320dadd86181c5e8fc15f40663755e/images_analysis) folder contains all code and data associated with the paper *"Automated processing for in situ soil monitoring: from raw images to population dynamics"*. [View the analysis.](https://htmlpreview.github.io/?https://github.com/emmabelaud/soil_scan/blob/24b6554309cb9a2cf67c79a98833a7e2e406e59e/images_analysis/Use-case.html).
 
 While buried scanner systems can generate image datasets of unprecedented spatio-temporal depth, translating this raw visual data into exploitable biological information represents a significant processing bottleneck. This study tackles this challenge by developing an **efficient end-to-end processing pipeline that combines traditional computer vision algorithms with state-of-the-art deep learning models**, specifically designed to operate under the constrained annotation budgets typical of ecological studies.
 
