@@ -873,8 +873,8 @@ p1 <- ggplot(plot_data_h1, aes(x = estimate, y = Manual_class, color = sig)) +
 p1
 
 # Export at 300 dpi for manuscript submission (MEE requires TIFF)
-tiff("../images_analysis/output/Fig.H1_population_stability_across_position.tiff",
-     width = 1000, height = 1000, res = 300)
+png("../images_analysis/output/Fig.H1_population_stability_across_position.png",
+    width = 2500, height = 2500, res = 300)
 p1
 invisible(dev.off())
 ```
@@ -1042,8 +1042,8 @@ p2 <- ggplot(h2_data, aes(x = est_man, y = est_classification)) +
 
 p2
 
-tiff("../images_analysis/output/Fig.H2_technological_congruence.tiff",
-     width = 1000, height = 1000, res = 300)
+png("../images_analysis/output/Fig.H2_technological_congruence.png",
+    width = 2500, height = 2500, res = 300)
 p2
 invisible(dev.off())
 ```
