@@ -774,7 +774,6 @@ validation_summary <- taxon_analysis %>%
   )
 ```
 
-## 3.3 Results
 
 ```{r}
 #| label: tbl-validation-styled
@@ -823,7 +822,7 @@ tbl_arranged %>%
   ))
 ```
 
-## 3.4 Results
+## 3.3 Results
 
 The forest plot below provides the primary visualisation for H1. Each row represents
 one taxon; the point is the maximum-likelihood estimate of the Position C coefficient
@@ -832,6 +831,7 @@ one taxon; the point is the maximum-likelihood estimate of the Position C coeffi
 cultivated zone; the single point to the left (Symphyla) indicates the reverse.
 Colour distinguishes statistically significant effects (p < 0.05; red) from
 non-significant ones (grey; Julida only).
+
 
 ```{r}
 #| label: fig-h1-forest-plot
@@ -883,6 +883,32 @@ tiff("../images_analysis/output/Fig.H1_population_stability_across_position.tiff
      width = 1000, height = 1000, res = 300)
 p1
 invisible(dev.off())
+```
+
+```{r}
+#| label: tbl-h1-results
+#| tbl-cap: "Generalized Linear Mixed Model (ZIG) parameters for the effect of land-use position on population stability (rolling CV). Estimates are on the log-link scale, where positive values indicate higher variability (lower stability) in cultivated zones."
+
+plot_data_h1 %>%
+  ungroup() %>%
+  select(Manual_class, estimate, std.error, statistic, p.value, sig) %>%
+  mutate(
+    Manual_class = str_to_title(Manual_class),
+    p.value = scales::pvalue(p.value) # Formats small p-values as <0.001
+  ) %>%
+  arrange(desc(estimate)) %>%
+  kbl(
+    digits = 3,
+    booktabs = TRUE,
+    col.names = c("Taxon", "Estimate", "Std. Error", "z-value", "p-value", "Significance")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE,
+    latex_options = "hold_position"
+  ) %>%
+  column_spec(1, italic = TRUE) %>%
+  column_spec(6, color = ifelse(plot_data_h1$sig == "Significant", "#ff6666", "#bcbcbc"))
 ```
 
 ---
@@ -1027,3 +1053,28 @@ tiff("../images_analysis/output/Fig.H2_technological_congruence.tiff",
 p2
 invisible(dev.off())
 ```
+
+```{r}
+#| label: tbl-h2-congruence
+#| tbl-cap: "Comparison of ecological effect size estimates between human taxonomists and the automated classification pipeline. 'Diff' represents the absolute discrepancy between manual and model-derived estimates."
+
+h2_data %>%
+  ungroup() %>%
+  mutate(
+    Taxon = str_to_title(Taxon),
+    across(where(is.numeric), round, 3)
+  ) %>%
+  select(Taxon, est_man, se_man, est_classification, se_classification, diff) %>%
+  kbl(
+    booktabs = TRUE,
+    col.names = c("Taxon", "Est (Human)", "SE (Human)", "Est (Model)", "SE (Model)", "Abs. Diff")
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  ) %>%
+  column_spec(1, italic = TRUE) %>%
+  column_spec(6, bold = TRUE) %>%
+  add_header_above(c(" " = 1, "Manual Pipeline" = 2, "Model Pipeline" = 2, " " = 1))
+```
+
