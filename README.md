@@ -1,4 +1,4 @@
-# In situ scanner-based imaging to monitor soil edaphic activity
+# In situ scanner-based imaging to monitor edaphic activity
 
 This repository supports the development of a soil biological activity monitoring method based on **buried flatbed scanners**. The approach relies on CIS-type flatbed scanners installed vertically in the soil, which continuously capture high-resolution images of the soil matrix *in situ*. These images enable the observation and tracking of various soil organisms — including invertebrates and roots structures — at fine spatial and temporal resolutions. Coupled with automated image capture (via Raspberry Pi modules) and a suite of image processing and analysis tools, this method offers a non-destructive, long-term window into belowground biological dynamics that traditional sampling approaches cannot easily provide.
 
