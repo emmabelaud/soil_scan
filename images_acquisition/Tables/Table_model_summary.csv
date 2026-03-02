@@ -1,0 +1,4 @@
+label,p (Frequency),p (Res × Freq),p (Resolution),R²m,AIC,BIC
+Enchytraeidae,0.0e+00 ***,0.332 ns,0.0e+00 ***,0.179,916.4,944.6
+Acari,0.086 ns,0.707 ns,0.0e+00 ***,0.234,502.3,533.3
+Collembola,0.142 ns,0.652 ns,0.0e+00 ***,0.203,360.6,389.3
