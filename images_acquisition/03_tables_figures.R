@@ -89,26 +89,27 @@ emm_taxa_tbl <- bind_rows(
 
 p_taxa <- emm_taxa_tbl %>%
   ggplot(aes(x = resolution, y = response)) +
-  geom_point(position = position_dodge(width = 0.2)) +
+  geom_point(position = position_dodge(width = 0.2), size = 1.5) +
   geom_errorbar(aes(ymin = lower.CL, ymax = upper.CL),
                 width = 0.1, position = position_dodge(width = 0.2)) +
   facet_grid(taxon ~ frequence) +
   scale_y_log10() +
   labs(
     x = "Acquisition interval (min)",
-    y = "Detected individuals per image \n (log scale)"
+    y = "Detected individuals per image (log scale)"
   ) +
-  theme_bw()
+  theme_bw(base_size = 9)+
+  theme(legend.position = "bottom",
+        strip.background = element_rect(fill = "#F3F4F4", colour = NA),
+        strip.text = element_text( face = "bold"),
+        axis.title = element_text(face = "bold"),
+        legend.title = element_text(face = "bold"))
 
 print(p_taxa)
 
 ggplot2::ggsave(
   filename = "images_acquisition/Figures/Figure2.png",
-  plot     = p_taxa,
-  width    = 180,
-  height   = 120,
-  units    = "mm",
-  dpi      = 300,
+  plot     = p_taxa, width = 4, height = 4, dpi = 300,
   bg       = "white"
 )
 
@@ -178,8 +179,8 @@ p_quant_taxon <- ggplot(
   det_q_long,
   aes(x = resolution, y = area_mm2, colour = quantile, group = quantile)
 ) +
-  geom_point(size = 2) +
-  geom_line(linewidth = 0.9) +
+  geom_point(size = 1) +
+  geom_line(linewidth = 0.5, alpha = 0.8) +
   scale_y_log10() +
   facet_grid(taxon ~ frequence) +
   labs(
@@ -187,13 +188,19 @@ p_quant_taxon <- ggplot(
     y = "Apparent area (mm², log scale)",
     colour = "Quantile"
   ) +
-  theme_bw() +
-  theme(legend.position = "bottom")+
+  theme_bw(base_size = 9) +
+  theme(legend.position = "bottom",
+        strip.background = element_rect(fill = "#F3F4F4", colour = NA),
+        strip.text = element_text( face = "bold"),
+        axis.title = element_text(face = "bold"),
+        legend.title = element_text(face = "bold", size=6),
+        legend.text  = element_text(size = 6),
+        legend.margin = margin(t = -5))+
   ggplot2::scale_colour_manual(
     values = c(
-      "25th percentile" = "#deebf7",
-      "Median"          = "#9ecae1",
-      "75th percentile" = "#3182bd"
+      "25th percentile" = "#95966eff",
+      "Median"          = "#ccc04fff",
+      "75th percentile" = "#DBCEA5"
     )
   )
 
@@ -202,7 +209,7 @@ print(p_quant_taxon)
 ggplot2::ggsave(
   "images_acquisition/Figures/Figure3.png",
   p_quant_taxon,
-  width = 220, height = 180, units = "mm", dpi = 300, bg = "white"
+  width = 4, height = 4, dpi = 300, bg = "white"
 )
 
 
@@ -357,19 +364,28 @@ p_fit <- ggplot() +
   geom_line(
     data = subset(cum_all, taxon != "Total"),
     aes(x = x, y = log(y), group = interaction(run_id, resolution, frequence), colour = resolution),
-    linewidth = 0.4, alpha = 0.25
+    linewidth = 0.3, alpha = 0.25
   ) +
   geom_line(
     data = pred_best,
     aes(x = x, y = log(pmax(y, 1e-9)), group = interaction(resolution, frequence), colour = resolution),
-    linewidth = 1.0
+    linewidth = 0.8, alpha = 0.8
   ) +
   facet_grid(taxon ~ frequence) +
   labs(x = "Number of events (images)", y = "Cumulative detections (log scale)", colour = "Resolution") +
-  theme_bw()+
-  scale_x_continuous(limits = c(1, 11), breaks = c(3,6,9))
+  scale_x_continuous(limits = c(1, 11), breaks = c(3,6,9))+
+  scale_color_manual(values = c('#FF4400', "#e89502ff", "#f0cb37ff"))+
+  theme_bw(base_size = 9)+
+  theme(legend.position = "bottom",
+        strip.background = element_rect(fill = "#F3F4F4", colour = NA),
+        strip.text = element_text( face = "bold"),
+        axis.title = element_text(face = "bold"),
+        legend.title = element_text(face = "bold", size=6),
+        legend.text  = element_text(size = 6),
+        legend.margin = margin(t = -5),
+        panel.grid.minor = element_blank())
 
 ggsave(
   filename = file.path(fig_dir, "Figure4.png"),
-  plot = p_fit, width = 11, height = 8, dpi = 300
+  plot = p_fit, width = 4, height = 4, dpi = 300
 )
