@@ -808,7 +808,7 @@ tbl_arranged %>%
   ) %>%
   column_spec(3, bold = TRUE) %>%
   # Light blue highlight for fallback RI rows — AR1 structure absent
-  row_spec(rows_fallback, background = "#ffe0e0") %>%
+  row_spec(rows_fallback, background = "#ffd7b4ff") %>%
   add_header_above(c(
     " "                          = 4,
     "Ecological effect (Pos. C)" = 4,
@@ -852,7 +852,7 @@ p1 <- ggplot(plot_data_h1, aes(x = estimate, y = Manual_class, color = sig)) +
   ) +
   geom_point(size = 2) +
   scale_color_manual(
-    values = c("Significant" = "#ff6666", "Non-significant" = "#bcbcbc")
+    values = c("Significant" = "#ff7f0eff", "Non-significant" = "#bcbcbc")
   ) +
   scale_y_discrete(expand = expansion(mult = c(0.15, 0.05))) +
   theme(
@@ -865,10 +865,8 @@ p1 <- ggplot(plot_data_h1, aes(x = estimate, y = Manual_class, color = sig)) +
     y     = NULL,
     color = "Statistical status"
   ) +
-  annotate("text", x =  0.5, y = 0.3, label = "Lower stability in C →",
-           fontface = "italic", size = 2) +
-  annotate("text", x = -0.5, y = 0.3, label = "← Lower stability in A",
-           fontface = "italic", size = 2)
+  annotate("text", x =  0.7, y = 0.3, label = "Lower stability in C →",
+           fontface = "italic", size = 1.5) 
 
 p1
 
@@ -890,7 +888,7 @@ plot_data_h1 %>%
     Manual_class = str_to_title(Manual_class),
     p.value = scales::pvalue(p.value) # Formats small p-values as <0.001
   ) %>%
-  arrange(desc(estimate)) %>%
+  #arrange(desc(estimate)) %>%
   kbl(
     digits = 3,
     booktabs = TRUE,
@@ -902,7 +900,7 @@ plot_data_h1 %>%
     latex_options = "hold_position"
   ) %>%
   column_spec(1, italic = TRUE) %>%
-  column_spec(6, color = ifelse(plot_data_h1$sig == "Significant", "#ff6666", "#bcbcbc"))
+  column_spec(6, color = ifelse(plot_data_h1$sig == "Significant", "#ff7f0eff", "#bcbcbc"))
 ```
 
 ---
@@ -1024,20 +1022,20 @@ p2 <- ggplot(h2_data, aes(x = est_man, y = est_classification)) +
   geom_errorbar(
     aes(ymin = est_classification - se_classification,
         ymax = est_classification + se_classification),
-    color = "#ff6666", width = 0, linewidth = 0.5
+    color = "#ff7f0eff", width = 0, linewidth = 0.5
   ) +
   # SE error bars for manual estimates (horizontal axis)
   geom_errorbarh(
     aes(xmin = est_man - se_man, xmax = est_man + se_man),
-    color = "#ff6666", height = 0, linewidth = 0.5
+    color = "#ff7f0eff", height = 0, linewidth = 0.5
   ) +
-  geom_point(size = 2, color = "#ff6666") +
+  geom_point(size = 2, color = "#ff7f0eff") +
   # Non-overlapping taxon labels to avoid overplotting
   ggrepel::geom_text_repel(aes(label = Taxon), size = 2,
                             vjust = 0.3, hjust = 0.5) +
   labs(
-    x = "Human estimated effect",
-    y = "Model estimated effect"
+    x = "Estimated effect from manual classification data",
+    y = "Estimated effect from model classification data"
   )
 
 p2
@@ -1069,6 +1067,6 @@ h2_data %>%
   ) %>%
   column_spec(1, italic = TRUE) %>%
   column_spec(6, bold = TRUE) %>%
-  add_header_above(c(" " = 1, "Manual Pipeline" = 2, "Model Pipeline" = 2, " " = 1))
+  add_header_above(c(" " = 1, "Manual pipeline" = 2, "Model pipeline" = 2, " " = 1))
 ```
 
